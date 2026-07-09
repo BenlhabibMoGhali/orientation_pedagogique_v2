@@ -1,0 +1,36 @@
+# Environnements et dépendances
+backend/venv/
+frontend/node_modules/
+frontend/dist/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+
+# Variables locales / secrets
+.env
+backend/.env
+frontend/.env
+
+# Uploads et fichiers générés
+backend/uploads/**/*
+!backend/uploads/.gitkeep
+!backend/uploads/documents_signes/.gitkeep
+!backend/uploads/fiches_engagement/.gitkeep
+!backend/uploads/archives/.gitkeep
+
+# Logs et OS
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Fichiers privés de configuration à envoyer séparément au professeur
+CONFIGURATION_PROF_PRIVEE.txt
+CONFIGURATION_PROF_PRIVEE_REEL.txt
+backend_env_pret.env
+*.env.local

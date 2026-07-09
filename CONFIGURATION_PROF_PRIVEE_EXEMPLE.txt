@@ -1,0 +1,31 @@
+FICHIER PRIVE - NE PAS METTRE SUR GITHUB
+
+Objectif : permettre au professeur de tester les emails et l'API Gemini.
+
+Etapes :
+1. Copier les valeurs ci-dessous dans backend/.env
+2. Remplacer les valeurs d'exemple par les vraies valeurs privées
+3. Lancer le projet avec : ./run_project.sh
+
+Contenu à mettre dans backend/.env :
+
+SECRET_KEY=orientation_pedagogique_secret_key_dev
+JWT_SECRET_KEY=orientation_pedagogique_jwt_secret_dev
+DB_HOST=localhost
+DB_PORT=3306
+DB_USER=root
+DB_PASSWORD=mot_de_passe_mysql_du_pc
+DB_NAME=orientation_pedagogique
+ADMIN_CREATION_KEY=ADMIN_ORIENTATION_2026
+
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=email_test@gmail.com
+SMTP_PASSWORD=mot_de_passe_application_gmail
+EMAIL_EXPEDITEUR=email_test@gmail.com
+EMAIL_DESTINATAIRE_DOCUMENTS=email_qui_recoit_les_documents@gmail.com
+
+GEMINI_API_KEY=cle_api_gemini
+GEMINI_MODEL=gemini-3.5-flash
+ANTHROPIC_API_KEY=
+CLAUDE_MODEL=claude-sonnet-4-6
