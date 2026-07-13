@@ -72,29 +72,42 @@ function EtudiantPage({ utilisateur, onLogout }) {
       return ''
     }
 
+    const convertirMarkdownSimple = (ligne, ligneIndex) => {
+      const morceaux = String(ligne).split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g)
+
+      return morceaux.map((morceau, index) => {
+        if (morceau.startsWith('**') && morceau.endsWith('**')) {
+          const contenu = morceau.slice(2, -2)
+
+          return (
+            <strong key={`${ligneIndex}-${index}`}>
+              <u>{contenu}</u>
+            </strong>
+          )
+        }
+
+        if (morceau.startsWith('*') && morceau.endsWith('*')) {
+          const contenu = morceau.slice(1, -1)
+
+          return (
+            <strong key={`${ligneIndex}-${index}`}>
+              <u>{contenu}</u>
+            </strong>
+          )
+        }
+
+        return morceau
+      })
+    }
+
     const lignes = String(texte).split('\n')
 
-    return lignes.map((ligne, ligneIndex) => {
-      const morceaux = ligne.split(/(\*\*.*?\*\*)/g)
-
-      return (
-        <span key={ligneIndex}>
-          {morceaux.map((morceau, index) => {
-            if (morceau.startsWith('**') && morceau.endsWith('**')) {
-              return (
-                <strong key={index}>
-                  {morceau.replaceAll('**', '')}
-                </strong>
-              )
-            }
-
-            return morceau
-          })}
-
-          {ligneIndex < lignes.length - 1 && <br />}
-        </span>
-      )
-    })
+    return lignes.map((ligne, ligneIndex) => (
+      <span key={ligneIndex}>
+        {convertirMarkdownSimple(ligne, ligneIndex)}
+        {ligneIndex < lignes.length - 1 && <br />}
+      </span>
+    ))
   }
 
   const convertirEtatEnResultat = (etat) => {

@@ -75,6 +75,45 @@ function DoyenPage({ utilisateur, onLogout }) {
     chargerTableauDoyen()
   }, [])
 
+  const afficherTexteAvecGrasEtSouligne = (texte) => {
+    if (!texte) {
+      return ''
+    }
+
+    const convertirMarkdownSimple = (ligne, ligneIndex) => {
+      const morceaux = String(ligne).split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g)
+
+      return morceaux.map((morceau, index) => {
+        if (morceau.startsWith('**') && morceau.endsWith('**')) {
+          return (
+            <strong key={`${ligneIndex}-${index}`}>
+              <u>{morceau.slice(2, -2)}</u>
+            </strong>
+          )
+        }
+
+        if (morceau.startsWith('*') && morceau.endsWith('*')) {
+          return (
+            <strong key={`${ligneIndex}-${index}`}>
+              <u>{morceau.slice(1, -1)}</u>
+            </strong>
+          )
+        }
+
+        return morceau
+      })
+    }
+
+    const lignes = String(texte).split('\n')
+
+    return lignes.map((ligne, ligneIndex) => (
+      <span key={ligneIndex}>
+        {convertirMarkdownSimple(ligne, ligneIndex)}
+        {ligneIndex < lignes.length - 1 && <br />}
+      </span>
+    ))
+  }
+
   useEffect(() => {
     if (ficheSelectionnee && ficheSelectionnee.fiche_id) {
       chargerHistoriqueEtudiant(ficheSelectionnee.fiche_id)
@@ -865,7 +904,7 @@ function DoyenPage({ utilisateur, onLogout }) {
                           </p>
                         )}
 
-                        <p>{messageDiscussion.contenu}</p>
+                        <p>{afficherTexteAvecGrasEtSouligne(messageDiscussion.contenu)}</p>
                       </div>
                     </div>
                   )

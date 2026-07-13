@@ -485,6 +485,64 @@ def _specialites_hesitees_declarees(reponses):
     return []
 
 
+def _specialites_citees_dans_reponse_libre(reponses):
+    """
+    Extrait les spécialités citées dans la réponse libre finale q10.
+
+    Cette information est utilisée uniquement pour éviter de poser une
+    clarification hors sujet. Exemple : si l'étudiant écrit "Full Stack et Big
+    Data", on ne doit pas ensuite lui poser une question Big Data / Cybersécurité.
+    """
+    if not isinstance(reponses, list):
+        return []
+
+    for rep in reversed(reponses):
+        if not isinstance(rep, dict):
+            continue
+
+        if rep.get("code_question") == "q10":
+            texte = _normaliser(rep.get("reponse", ""))
+            resultat = []
+
+            for specialite in SPECIALITES:
+                if _normaliser(specialite) in texte:
+                    resultat.append(specialite)
+
+            return resultat
+
+    return []
+
+
+def _score_de(scores, specialite):
+    if not isinstance(scores, dict):
+        return 0
+
+    return float(scores.get(specialite, 0) or 0)
+
+
+def _ecart_score_brut(scores, s1, s2):
+    return abs(_score_de(scores, s1) - _score_de(scores, s2))
+
+
+def _paire_est_reellement_proche(scores, pourcentages, s1, s2):
+    """
+    Une clarification ne doit être posée que si l'écart est réellement faible.
+
+    On combine deux critères :
+    - écart en pourcentage de recommandation ;
+    - écart en score brut.
+
+    Cela évite les questions supplémentaires inutiles lorsque la filière
+    dominante est déjà clairement devant.
+    """
+    p1 = float(pourcentages.get(s1, 0) or 0)
+    p2 = float(pourcentages.get(s2, 0) or 0)
+    ecart_pourcentage = abs(p1 - p2)
+    ecart_score = _ecart_score_brut(scores, s1, s2)
+
+    return ecart_pourcentage <= 5.0 or ecart_score <= 3.0
+
+
 def _choisir_paire_a_clarifier(scores, reponses):
     pourcentages = _pourcentages(scores)
     tries = sorted(pourcentages.items(), key=lambda item: item[1], reverse=True)
@@ -493,30 +551,57 @@ def _choisir_paire_a_clarifier(scores, reponses):
         return None
 
     paires_deja_posees = _paires_deja_clarifiees(reponses)
+    specialites_reponse_libre = _specialites_citees_dans_reponse_libre(reponses)
     hesitations = _specialites_hesitees_declarees(reponses)
 
-    if len(hesitations) >= 2:
+    # Si l'étudiant a cité exactement deux spécialités dans sa réponse libre,
+    # cette paire est prioritaire. On ne pose pas une question sur une autre paire.
+    if len(specialites_reponse_libre) == 2:
+        s1, s2 = specialites_reponse_libre
+        cle = _cle_paire_specialites(s1, s2)
+
+        if cle not in paires_deja_posees and _paire_est_reellement_proche(scores, pourcentages, s1, s2):
+            return s1, s2
+
+        return None
+
+    # Si l'étudiant a déclaré une hésitation entre 2 ou 3 spécialités, on peut
+    # choisir la paire la plus proche parmi celles-ci. S'il coche toutes les
+    # spécialités, ce n'est pas une vraie hésitation exploitable : on ignore la
+    # liste et on revient aux scores.
+    if 2 <= len(hesitations) <= 3:
+        paires_candidates = []
+
         for index_1 in range(len(hesitations)):
             for index_2 in range(index_1 + 1, len(hesitations)):
                 s1 = hesitations[index_1]
                 s2 = hesitations[index_2]
                 cle = _cle_paire_specialites(s1, s2)
 
-                if cle not in paires_deja_posees:
-                    return s1, s2
+                if cle in paires_deja_posees:
+                    continue
+
+                if not _paire_est_reellement_proche(scores, pourcentages, s1, s2):
+                    continue
+
+                paires_candidates.append((_ecart_score_brut(scores, s1, s2), abs(pourcentages.get(s1, 0) - pourcentages.get(s2, 0)), s1, s2))
+
+        if paires_candidates:
+            paires_candidates.sort(key=lambda item: (item[0], item[1]))
+            return paires_candidates[0][2], paires_candidates[0][3]
 
         return None
 
+    # Cas général : seulement la paire des deux meilleurs scores, et seulement
+    # si elle est vraiment proche.
     s1, p1 = tries[0]
     s2, p2 = tries[1]
-    ecart = abs(p1 - p2)
-
-    if ecart > 12:
-        return None
-
     cle = _cle_paire_specialites(s1, s2)
 
     if cle in paires_deja_posees:
+        return None
+
+    if not _paire_est_reellement_proche(scores, pourcentages, s1, s2):
         return None
 
     return s1, s2
@@ -525,7 +610,9 @@ def _choisir_paire_a_clarifier(scores, reponses):
 def get_question_clarification_si_necessaire(scores, reponses):
     nombre_clarifications = _reponses_deja_clarifiees(reponses)
 
-    if nombre_clarifications >= 2:
+    # Une seule question de clarification suffit.
+    # Cela évite les deux questions finales systématiques.
+    if nombre_clarifications >= 1:
         return None
 
     paire_a_clarifier = _choisir_paire_a_clarifier(scores, reponses)

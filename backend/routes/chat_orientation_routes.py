@@ -106,67 +106,160 @@ def normaliser_texte_detection(texte):
 
 def message_est_demande_aide_ou_proposition(question_actuelle, message_etudiant):
     """
-    Détecte les messages de type :
-    - je ne sais pas, propose-moi une idée ;
-    - aide-moi à répondre ;
-    - conseille-moi ;
-    - quelle spécialité/projet choisir ?
+    Détecte les messages qui ne doivent PAS faire avancer le questionnaire.
 
-    On applique cette règle uniquement sur les questions en texte libre.
-    Les réponses par cases cochées comme "Je ne sais pas encore" doivent rester
-    de vraies réponses au questionnaire.
+    Correction importante : la détection ne dépend plus uniquement de
+    type_question = "texte_libre". Dans certains cas, après une première
+    réponse d'aide, le frontend ou l'état de session peut renvoyer une question
+    de clarification. Si l'étudiant écrit encore "donne-moi des exemples", le
+    backend doit quand même répondre à la demande et rester sur la même étape.
+
+    Le questionnaire avance seulement si le message ressemble réellement à une
+    réponse d'orientation. Les demandes d'aide, d'exemples ou les questions
+    restent bloquées sur la même question.
     """
-    if not isinstance(question_actuelle, dict):
-        return False
-
-    if question_actuelle.get("type_question") != "texte_libre":
-        return False
-
     texte_original = str(message_etudiant or "").strip()
     texte = normaliser_texte_detection(texte_original)
 
+    if texte == "":
+        return False
+
+    # Les réponses provenant des cases cochées sont déjà structurées par le
+    # frontend. Elles doivent continuer normalement.
     if texte.startswith("reponses selectionnees"):
         return False
 
-    motifs = [
+    # Les réponses de type hésitation sont de vraies réponses, pas des demandes
+    # d'aide, même si elles contiennent plusieurs spécialités.
+    if texte.startswith("oui, specialites hesitees"):
+        return False
+
+    marqueurs_question = [
+        "?",
+        "est ce que",
+        "est-ce que",
+        "puis je",
+        "puis-je",
+        "peux je",
+        "peux-je",
+        "peux tu",
+        "peux-tu",
+        "peut tu",
+        "peut-tu",
+        "pouvez vous",
+        "pouvez-vous",
+        "tu peux",
+        "vous pouvez",
+        "comment",
+        "pourquoi",
+        "combien",
+        "quel ",
+        "quelle ",
+        "quels ",
+        "quelles ",
+        "quoi ",
+        "c est quoi",
+        "c'est quoi",
+        "qu est ce que",
+        "qu'est ce que",
+        "quelle est la difference",
+        "difference entre",
+        "différence entre"
+    ]
+
+    motifs_assistance_forts = [
         "je ne sais pas",
         "j ne sais pas",
         "je sais pas",
+        "je ne sais quoi",
+        "je ne sais pas quoi",
+        "aucune idee",
+        "aucune ide",
+        "aucune idée",
+        "pas d idee",
+        "pas d ide",
+        "pas d'idée",
+        "aide moi",
+        "aidez moi",
+        "aide-moi",
+        "conseille moi",
+        "conseillez moi",
+        "conseille-moi",
+        "propose moi",
+        "proposes moi",
+        "proposez moi",
+        "propose-moi",
+        "proposez-moi",
+        "tu me propose",
+        "tu me proposes",
+        "vous me proposez",
         "propose",
         "proposer",
         "proposes",
-        "tu me propose",
-        "tu me proposes",
-        "aide moi",
-        "aidez moi",
-        "conseille moi",
-        "conseiller",
+        "donne moi",
+        "donnez moi",
+        "donne-moi",
+        "donnez-moi",
+        "des exemple",
+        "des exemples",
+        "exemple de projet",
+        "exemples de projet",
+        "exemple projet",
+        "exemples projet",
+        "idee de projet",
+        "idees de projet",
+        "idée de projet",
+        "idées de projet",
+        "des idees",
+        "des idées",
+        "des ide",
+        "des idees de projet",
         "que choisir",
         "quoi choisir",
-        "quel projet",
-        "quelle specialite",
-        "qu est ce que je peux ecrire",
-        "quoi ecrire"
+        "quel projet choisir",
+        "quelle specialite choisir",
+        "quoi ecrire",
+        "que dois je ecrire",
+        "que puis je ecrire",
+        "je vais choisir",
+        "je choisirai",
+        "je choisirais"
     ]
 
-    return any(motif in texte for motif in motifs) or "?" in texte_original
+    contient_question = any(marqueur in texte for marqueur in marqueurs_question)
+    contient_assistance_forte = any(motif in texte for motif in motifs_assistance_forts)
 
+    if not contient_question and not contient_assistance_forte:
+        return False
+
+    # Sur la question libre finale, toute question/demande d'aide doit bloquer
+    # l'avancement.
+    if isinstance(question_actuelle, dict) and question_actuelle.get("type_question") == "texte_libre":
+        return True
+
+    # Même si l'état courant n'est plus marqué texte_libre, une demande forte
+    # comme "donne moi des exemples" doit rester une clarification.
+    if contient_assistance_forte:
+        return True
+
+    # Pour une vraie question écrite manuellement, on répond aussi sans avancer.
+    if contient_question:
+        return True
+
+    return False
 
 def obtenir_traitement_orientation(question_actuelle, message_etudiant, scores_actuels, historique):
     """
-    Utilise Gemini lorsque c'est possible, puis bascule sur le moteur local.
+    Utilise Gemini en priorité pour analyser intelligemment l'intention.
 
-    - Les demandes d'aide/proposition ne doivent pas faire avancer le test.
-    - Les réponses normales sont analysées par Gemini si la clé est disponible.
-    - Si Gemini est absent ou en erreur, le moteur local continue à fonctionner.
+    Objectif : laisser Gemini comprendre les fautes, les questions et les
+    demandes d'aide. Si Gemini décide que le message est une demande
+    d'assistance, le questionnaire reste sur la même question. Si Gemini décide
+    que c'est une vraie réponse d'orientation, le questionnaire avance.
+
+    Si Gemini est indisponible, on garde un secours local pour que le projet
+    reste utilisable pendant la démonstration.
     """
-    if message_est_demande_aide_ou_proposition(question_actuelle, message_etudiant):
-        return repondre_clarification_avec_gemini(
-            question_actuelle,
-            message_etudiant,
-            historique
-        )
-
     traitement_gemini = traiter_message_chat_avec_gemini(
         question_actuelle,
         message_etudiant,
@@ -176,6 +269,14 @@ def obtenir_traitement_orientation(question_actuelle, message_etudiant, scores_a
 
     if traitement_gemini is not None:
         return traitement_gemini
+
+    # Secours local seulement si Gemini n'a pas répondu.
+    if message_est_demande_aide_ou_proposition(question_actuelle, message_etudiant):
+        return repondre_clarification_avec_gemini(
+            question_actuelle,
+            message_etudiant,
+            historique
+        )
 
     return traiter_message_etudiant(
         question_actuelle,

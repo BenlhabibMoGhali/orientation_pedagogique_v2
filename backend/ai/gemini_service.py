@@ -33,6 +33,76 @@ def gemini_est_disponible():
         return False
 
 
+
+def get_modeles_gemini_a_essayer():
+    """
+    Retourne une liste de modèles Gemini à essayer.
+
+    Si GEMINI_MODEL est défini dans .env, il est essayé en premier.
+    Ensuite, quelques noms courants sont testés comme secours. Cela évite
+    qu'un mauvais nom de modèle bloque totalement le chatbot.
+    """
+    model_env = str(os.getenv("GEMINI_MODEL") or "").strip()
+
+    modeles = []
+
+    if model_env != "":
+        modeles.append(model_env)
+
+    modeles_secours = [
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-latest"
+    ]
+
+    for modele in modeles_secours:
+        if modele not in modeles:
+            modeles.append(modele)
+
+    return modeles
+
+
+def appeler_gemini(prompt):
+    """
+    Appelle Gemini et renvoie le texte généré.
+
+    La fonction essaie plusieurs noms de modèles pour éviter qu'une valeur
+    GEMINI_MODEL incorrecte dans .env empêche l'analyse intelligente.
+    """
+    if not gemini_est_disponible():
+        return None
+
+    try:
+        from google import genai
+
+        api_key = os.getenv("GEMINI_API_KEY")
+        client = genai.Client(api_key=api_key)
+
+        derniere_erreur = None
+
+        for modele in get_modeles_gemini_a_essayer():
+            try:
+                response = client.models.generate_content(
+                    model=modele,
+                    contents=prompt
+                )
+
+                if response is not None and getattr(response, "text", None):
+                    return response.text
+
+            except Exception as e:
+                derniere_erreur = e
+                print(f"Erreur Gemini avec le modèle {modele} :", e)
+
+        if derniere_erreur is not None:
+            print("Aucun modèle Gemini n'a répondu correctement.")
+
+        return None
+
+    except Exception as e:
+        print("Erreur initialisation Gemini :", e)
+        return None
+
 def normaliser_texte(texte):
     if texte is None:
         return ""
@@ -45,6 +115,44 @@ def normaliser_texte(texte):
     texte = " ".join(texte.split())
 
     return texte
+
+
+def message_demande_exemples_ou_proposition(message_etudiant):
+    """
+    Détection locale prioritaire des demandes d'idées/exemples.
+    Cette fonction évite que Gemini ou le moteur de scoring interprète
+    "donne-moi des exemples" comme une réponse finale.
+    """
+    texte = normaliser_texte(message_etudiant)
+
+    motifs = [
+        "je ne sais pas",
+        "je sais pas",
+        "aucune idee",
+        "aucune ide",
+        "pas d idee",
+        "pas d ide",
+        "propose",
+        "proposer",
+        "proposes",
+        "donne moi",
+        "donnez moi",
+        "des exemple",
+        "des exemples",
+        "exemple",
+        "exemples",
+        "idee de projet",
+        "idees de projet",
+        "des idees",
+        "des ide",
+        "quel projet",
+        "que choisir",
+        "quoi choisir",
+        "je vais choisir"
+    ]
+
+    return any(motif in texte for motif in motifs)
+
 
 
 def extraire_json_depuis_texte(texte):
@@ -185,8 +293,20 @@ Tu es un assistant d’orientation pédagogique intégré dans une plateforme un
 Ton rôle est d’analyser CHAQUE message de l’étudiant avec Gemini avant que le système décide de passer ou non à la question suivante.
 
 Tu dois toujours faire deux choses :
-1. Classifier le message de l’étudiant.
-2. Retourner uniquement un JSON valide.
+1. Corriger mentalement les fautes de frappe, abréviations et formulations imparfaites.
+2. Classifier le message de l’étudiant.
+3. Retourner uniquement un JSON valide.
+
+IMPORTANT :
+- Tu ne dois PAS supposer qu’un message mal écrit est une vraie réponse.
+- Si l’étudiant dit qu’il n’a pas d’idée, qu’il ne sait pas, qu’il demande des exemples,
+  des idées ou une proposition, alors c’est toujours une demande_clarification.
+- Même si le message contient beaucoup de fautes, tu dois comprendre l’intention.
+- Exemples de fautes à comprendre :
+  * "j au aucunnne ide" = "j’ai aucune idée" = demande_clarification
+  * "g aucune ide" = "j’ai aucune idée" = demande_clarification
+  * "donne moi des exemple" = demande_clarification
+  * "jsp quoi choisir" = demande_clarification
 
 ==================================================
 RÈGLE PRINCIPALE
@@ -234,12 +354,16 @@ Utilise ce type si l’étudiant :
 - dit qu’il n’a pas compris,
 - demande une précision sur le fonctionnement du test,
 - dit qu’il ne sait pas quoi répondre et demande une proposition,
-- demande au chatbot de proposer une idée de projet ou une piste.
+- demande au chatbot de proposer une idée de projet ou une piste ;
+- demande des exemples de projets ;
+- écrit “donne-moi des exemples”, “donne-moi des idées”, “je vais choisir après” ;
+- mélange une réponse personnelle avec une question, par exemple : “je veux faire une application web, est-ce que c’est bien ?”.
 
 Dans ce cas :
 - scores doit être 0 pour toutes les spécialités.
 - message_bot doit répondre clairement à la question de l’étudiant.
 - Le système doit rester sur la même question.
+- Si l'étudiant a demandé des exemples, donne des exemples concrets de projets par filière et demande ensuite de choisir celui qui l'attire le plus.
 
 3. "demande_information_filiere"
 
@@ -341,6 +465,47 @@ Réponse attendue :
 type_message = "demande_clarification"
 
 Message étudiant :
+"donne-moi des exemples de projets et je vais choisir"
+Réponse attendue :
+type_message = "demande_clarification"
+message_bot doit donner des exemples concrets et demander à l'étudiant de choisir.
+
+Message étudiant :
+"donne moi des exemple"
+Réponse attendue :
+type_message = "demande_clarification"
+message_bot doit donner des exemples concrets de projets par filière et demander à l'étudiant de choisir.
+
+Message étudiant :
+"j au aucunnne ide"
+Réponse attendue :
+type_message = "demande_clarification"
+message_bot doit expliquer que ce n’est pas grave et proposer des exemples de projets.
+
+Message étudiant :
+"g aucune ide"
+Réponse attendue :
+type_message = "demande_clarification"
+message_bot doit proposer des exemples de projets.
+
+Message étudiant :
+"jsp quoi choisir"
+Réponse attendue :
+type_message = "demande_clarification"
+message_bot doit aider l'étudiant sans faire avancer le questionnaire.
+
+Message étudiant :
+"je veux créer une application web intelligente, est-ce que c'est un bon projet ?"
+Réponse attendue :
+type_message = "demande_clarification"
+message_bot doit répondre à la question et demander une confirmation/réponse finale avant d'avancer.
+
+Message étudiant :
+"je veux créer une application web intelligente pour aider les étudiants"
+Réponse attendue :
+type_message = "reponse_orientation"
+
+Message étudiant :
 "salut ça va ?"
 Réponse attendue :
 type_message = "hors_sujet"
@@ -424,13 +589,6 @@ def traiter_message_chat_avec_gemini(
         return None
 
     try:
-        from google import genai
-
-        api_key = os.getenv("GEMINI_API_KEY")
-        model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
-
-        client = genai.Client(api_key=api_key)
-
         prompt_complet = construire_prompt_principal(
             question_actuelle,
             message_etudiant,
@@ -438,12 +596,11 @@ def traiter_message_chat_avec_gemini(
             historique
         )
 
-        response = client.models.generate_content(
-            model=model,
-            contents=prompt_complet
-        )
+        texte = appeler_gemini(prompt_complet)
 
-        texte = response.text
+        if texte is None:
+            return None
+
         donnees = extraire_json_depuis_texte(texte)
 
         return nettoyer_reponse_gemini(donnees)
@@ -455,6 +612,32 @@ def traiter_message_chat_avec_gemini(
 
 def generer_reponse_clarification_locale(question_actuelle, message_etudiant):
     texte = normaliser_texte(message_etudiant)
+
+    demande_proposition = message_demande_exemples_ou_proposition(message_etudiant)
+
+    # Cette condition doit passer AVANT "plusieurs choix".
+    # Sinon une phrase comme "donne moi des exemples et je vais choisir"
+    # peut être mal interprétée à cause du mot "choisir".
+    if demande_proposition:
+        return (
+            "Bien sûr. Voici des exemples de projets concrets que vous pouvez choisir "
+            "selon ce qui vous attire le plus :\n\n"
+            "- Intelligence Artificielle : créer un système de recommandation de filière, "
+            "un chatbot intelligent, un modèle de prédiction des résultats ou un système "
+            "de reconnaissance d’images.\n"
+            "- Big Data : créer un tableau de bord pour analyser les notes, les absences, "
+            "les choix des étudiants ou les statistiques d’une promotion.\n"
+            "- Cybersécurité : développer un mini-système de détection de phishing, "
+            "un testeur de mots de passe faibles ou un outil simple d’analyse de sécurité.\n"
+            "- Développement Full Stack : créer une plateforme web complète de gestion "
+            "des stages, des inscriptions, des documents administratifs ou des réclamations.\n"
+            "- Robotique et Cobotique : réaliser un système avec capteurs pour détecter "
+            "un obstacle, automatiser une tâche ou commander un petit robot.\n\n"
+            "Choisissez maintenant l’exemple qui vous attire le plus, puis expliquez "
+            "brièvement pourquoi. Par exemple : “Je veux créer une plateforme web "
+            "intelligente pour aider les étudiants, parce que j’aime le développement "
+            "et l’IA.”"
+        )
 
     parle_de_plusieurs_choix = (
         "2" in texte
@@ -479,30 +662,6 @@ def generer_reponse_clarification_locale(question_actuelle, message_etudiant):
             "ou modules préférés."
         )
 
-    demande_proposition = (
-        "propose" in texte
-        or "proposer" in texte
-        or "proposes" in texte
-        or "je ne sais pas" in texte
-        or "je sais pas" in texte
-        or "quoi ecrire" in texte
-        or "que choisir" in texte
-        or "quel projet" in texte
-    )
-
-    if demande_proposition:
-        return (
-            "Je peux vous proposer des pistes, mais le choix doit rester basé sur "
-            "vos préférences. Par exemple : si vous aimez analyser des données et "
-            "faire des tableaux de bord, pensez à Big Data ; si vous aimez créer un "
-            "modèle capable d’apprendre ou de prédire, pensez à Intelligence "
-            "Artificielle ; si vous aimez sécuriser des systèmes, pensez à "
-            "Cybersécurité ; si vous aimez créer une application complète, pensez à "
-            "Développement Full Stack ; si vous aimez les capteurs, l’électronique "
-            "ou l’automatisation, pensez à Robotique et Cobotique. Répondez ensuite "
-            "avec la piste qui vous attire le plus et pourquoi."
-        )
-
     if "pas compris" in texte or "comprends pas" in texte or "explique" in texte:
         return (
             "Bien sûr. La question actuelle vous demande simplement de parler "
@@ -518,7 +677,6 @@ def generer_reponse_clarification_locale(question_actuelle, message_etudiant):
         "donner une réponse courte ou détaillée."
     )
 
-
 def repondre_clarification_avec_gemini(question_actuelle, message_etudiant, historique=None):
     if historique is None:
         historique = []
@@ -528,6 +686,9 @@ def repondre_clarification_avec_gemini(question_actuelle, message_etudiant, hist
         message_etudiant
     )
 
+    # Gemini est utilisé en priorité pour comprendre les fautes de frappe,
+    # les demandes d'exemples, les questions mélangées à une réponse, etc.
+    # La réponse locale ne sert que de secours si Gemini est indisponible.
     if not gemini_est_disponible():
         return {
             "type_message": "demande_clarification",
@@ -540,13 +701,6 @@ def repondre_clarification_avec_gemini(question_actuelle, message_etudiant, hist
         }
 
     try:
-        from google import genai
-
-        api_key = os.getenv("GEMINI_API_KEY")
-        model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
-
-        client = genai.Client(api_key=api_key)
-
         prompt = f"""
 Tu es un assistant d’orientation pédagogique dans une plateforme universitaire.
 
@@ -563,6 +717,9 @@ Règles obligatoires :
 - Ne fais pas avancer le questionnaire.
 - Ne donne aucun score d’orientation.
 - Ne choisis aucune spécialité à la place de l’étudiant.
+- Corrige mentalement les fautes de frappe.
+- Comprends les phrases mal écrites comme "j au aucunnne ide", "g aucune ide", "jsp quoi choisir".
+- Si l’étudiant demande des exemples, des idées ou une proposition, donne des exemples concrets de projets par filière.
 - Réponds précisément à la question de l’étudiant.
 - Si l’étudiant demande s’il peut choisir plusieurs options, domaines, modules ou propositions, réponds clairement que oui.
 - À la fin, invite l’étudiant à répondre à la question actuelle pour continuer.
@@ -585,12 +742,19 @@ Tu dois retourner uniquement un JSON valide au format suivant :
 }}
 """
 
-        response = client.models.generate_content(
-            model=model,
-            contents=prompt
-        )
+        texte = appeler_gemini(prompt)
 
-        texte = response.text
+        if texte is None:
+            return {
+                "type_message": "demande_clarification necessairevff",
+                "message_bot": reponse_locale,
+                "scores": get_scores_vides(),
+                "domaines_detectes": [],
+                "hesitation_detectee": False,
+                "commentaire_analyse": "Gemini indisponible pour clarification.",
+                "source": "locale"
+            }
+
         data = extraire_json_depuis_texte(texte)
 
         if data is None:
