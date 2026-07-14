@@ -9,6 +9,50 @@ from datetime import datetime
 from database.db import get_db_connection
 from services.annee_universitaire_service import get_code_annee_universitaire_active
 
+SPECIALITES_OFFICIELLES_PAR_ID = {
+    1: "Big Data",
+    2: "Intelligence Artificielle",
+    3: "Cybersécurité",
+    4: "Développement Full Stack",
+    5: "Robotique et Cobotique"
+}
+
+
+def normaliser_nom_specialite(valeur, specialite_id=None):
+    if specialite_id is not None:
+        try:
+            identifiant = int(specialite_id)
+            if identifiant in SPECIALITES_OFFICIELLES_PAR_ID:
+                return SPECIALITES_OFFICIELLES_PAR_ID[identifiant]
+        except Exception:
+            pass
+
+    texte = str(valeur or "").strip()
+    texte_minuscule = texte.lower()
+
+    if texte == "":
+        return ""
+
+    if (
+        "cyber" in texte_minuscule
+        or "cybers├®curit├®" in texte
+        or "cybers|®curit|®" in texte
+        or "cybers�curit" in texte_minuscule
+    ):
+        return "Cybersécurité"
+
+    if (
+        "full stack" in texte_minuscule
+        or "d├®veloppement" in texte_minuscule
+        or "d|®veloppement" in texte_minuscule
+        or "d�veloppement" in texte_minuscule
+    ):
+        return "Développement Full Stack"
+
+    return texte
+
+
+
 
 def json_to_text(data):
     return json.dumps(data, ensure_ascii=False)
@@ -823,7 +867,7 @@ def enregistrer_archive_export_excel(annee_universitaire, nom_fichier, chemin_ar
         connection.close()
 
 
-def lister_archives_administratives():
+def lister_archives_administratives(annee_universitaire=None):
     connection = get_db_connection()
 
     if connection is None:
@@ -835,41 +879,79 @@ def lister_archives_administratives():
     cursor = connection.cursor(dictionary=True)
 
     try:
-        cursor.execute(
-            """
-            SELECT
-                id,
-                id_universitaire,
-                nom,
-                prenom,
-                email_outlook,
-                filiere_choisie,
-                annee_universitaire,
-                nom_fichier_archive,
-                date_archivage
-            FROM archives_fiches_engagement
-            ORDER BY date_archivage DESC, id DESC
-            """
-        )
+        if annee_universitaire:
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    id_universitaire,
+                    nom,
+                    prenom,
+                    email_outlook,
+                    filiere_choisie,
+                    annee_universitaire,
+                    nom_fichier_archive,
+                    date_archivage
+                FROM archives_fiches_engagement
+                WHERE annee_universitaire = %s
+                ORDER BY date_archivage DESC, id DESC
+                """,
+                (annee_universitaire,)
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    id_universitaire,
+                    nom,
+                    prenom,
+                    email_outlook,
+                    filiere_choisie,
+                    annee_universitaire,
+                    nom_fichier_archive,
+                    date_archivage
+                FROM archives_fiches_engagement
+                ORDER BY date_archivage DESC, id DESC
+                """
+            )
+
         fiches = cursor.fetchall()
 
-        cursor.execute(
-            """
-            SELECT
-                id,
-                annee_universitaire,
-                nom_fichier,
-                date_generation
-            FROM archives_exports_excel
-            ORDER BY date_generation DESC, id DESC
-            """
-        )
+        if annee_universitaire:
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    annee_universitaire,
+                    nom_fichier,
+                    date_generation
+                FROM archives_exports_excel
+                WHERE annee_universitaire = %s
+                ORDER BY date_generation DESC, id DESC
+                """,
+                (annee_universitaire,)
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    annee_universitaire,
+                    nom_fichier,
+                    date_generation
+                FROM archives_exports_excel
+                ORDER BY date_generation DESC, id DESC
+                """
+            )
+
         exports = cursor.fetchall()
 
         return {
             "success": True,
-            "fiches": fiches,
-            "exports": exports
+            "annee_universitaire": annee_universitaire,
+            "fiches": _normaliser_liste_export(fiches),
+            "exports": _normaliser_liste_export(exports)
         }
 
     finally:
@@ -1141,7 +1223,7 @@ def confirmer_ou_refuser_document(choix_id, doyen_id, decision, remarque=None):
         cursor.close()
         connection.close()
 
-def get_statistiques_places_filieres():
+def get_statistiques_places_filieres(annee_universitaire=None):
     """
     Retourne une répartition simple des choix par filière.
     Cette fonction ne gère aucune place, capacité ou classe.
@@ -1155,7 +1237,8 @@ def get_statistiques_places_filieres():
     cursor = connection.cursor(dictionary=True)
 
     try:
-        annee_universitaire = get_code_annee_universitaire_active()
+        if not annee_universitaire:
+            annee_universitaire = get_code_annee_universitaire_active()
 
         cursor.execute(
             """
@@ -1166,7 +1249,12 @@ def get_statistiques_places_filieres():
                 COALESCE(SUM(CASE WHEN cfo.statut_choix = 'choix_confirme' THEN 1 ELSE 0 END), 0) AS documents_confirmes,
                 COALESCE(SUM(CASE WHEN cfo.statut_choix = 'en_attente_confirmation_doyen' THEN 1 ELSE 0 END), 0) AS documents_en_attente,
                 COALESCE(SUM(CASE WHEN cfo.statut_choix = 'document_refuse' THEN 1 ELSE 0 END), 0) AS documents_refuses,
-                COALESCE(SUM(CASE WHEN cfo.statut_choix = 'fiche_generee' THEN 1 ELSE 0 END), 0) AS fiches_engagement_generees
+                COALESCE(SUM(CASE WHEN cfo.statut_choix IN (
+                    'fiche_generee',
+                    'en_attente_confirmation_doyen',
+                    'choix_confirme',
+                    'document_refuse'
+                ) THEN 1 ELSE 0 END), 0) AS fiches_engagement_generees
             FROM specialites s
             LEFT JOIN choix_finaux_orientation cfo
                 ON cfo.specialite_id = s.id
@@ -1177,7 +1265,7 @@ def get_statistiques_places_filieres():
             (annee_universitaire,)
         )
 
-        return cursor.fetchall()
+        return _normaliser_liste_export(cursor.fetchall())
 
     finally:
         cursor.close()
@@ -1368,7 +1456,21 @@ def _normaliser_ligne_export(ligne):
     resultat = {}
 
     for cle, valeur in ligne.items():
-        resultat[cle] = _normaliser_valeur_export(valeur)
+        valeur_normalisee = _normaliser_valeur_export(valeur)
+
+        if cle == "specialite":
+            valeur_normalisee = normaliser_nom_specialite(
+                valeur_normalisee,
+                ligne.get("specialite_id")
+            )
+        elif cle in [
+            "filiere_choisie",
+            "filiere_recommandee",
+            "specialite_recommandee"
+        ]:
+            valeur_normalisee = normaliser_nom_specialite(valeur_normalisee)
+
+        resultat[cle] = valeur_normalisee
 
     return resultat
 
@@ -2269,10 +2371,16 @@ def _compter_lignes_tableau_bord(cursor, requete, params=None):
     return int(ligne.get("total", 0) or 0)
 
 
-def get_tableau_bord_doyen_avance():
+def get_tableau_bord_doyen_avance(annee_universitaire=None):
     """
     Construit un tableau de bord global pour l'espace doyen.
-    Les indicateurs sont filtrés sur l'année universitaire active.
+
+    Nouvelle logique :
+    - il n'y a plus d'import obligatoire d'une liste officielle ;
+    - les statistiques principales sont calculées à partir des étudiants
+      réellement enregistrés dans la plateforme ;
+    - les documents/choix restent filtrés sur l'année universitaire active,
+      car le choix final possède déjà le champ annee_universitaire.
     """
     connection = get_db_connection()
 
@@ -2283,40 +2391,39 @@ def get_tableau_bord_doyen_avance():
         }
 
     cursor = connection.cursor(dictionary=True)
-    annee_universitaire = get_code_annee_universitaire_active()
+
+    if not annee_universitaire:
+        annee_universitaire = get_code_annee_universitaire_active()
 
     try:
+        # Après suppression de la liste officielle, un étudiant inscrit est
+        # simplement un étudiant présent dans la table etudiants.
         total_etudiants = _compter_lignes_tableau_bord(
             cursor,
             """
             SELECT COUNT(*) AS total
             FROM etudiants
-            WHERE promotion = %s
-            """,
-            (annee_universitaire,)
+            """
         )
 
+        # Les tests et fiches sont aussi comptés depuis la plateforme.
+        # On évite le filtre e.promotion = annee_universitaire, car certains
+        # comptes de test ou comptes créés manuellement peuvent ne pas avoir
+        # exactement le même format de promotion que l'année active.
         total_tests = _compter_lignes_tableau_bord(
             cursor,
             """
             SELECT COUNT(*) AS total
-            FROM tests_orientation t
-            JOIN etudiants e ON t.etudiant_id = e.id
-            WHERE e.promotion = %s
-            """,
-            (annee_universitaire,)
+            FROM tests_orientation
+            """
         )
 
         total_fiches = _compter_lignes_tableau_bord(
             cursor,
             """
             SELECT COUNT(*) AS total
-            FROM fiches_intelligentes fi
-            JOIN tests_orientation t ON fi.test_orientation_id = t.id
-            JOIN etudiants e ON t.etudiant_id = e.id
-            WHERE e.promotion = %s
-            """,
-            (annee_universitaire,)
+            FROM fiches_intelligentes
+            """
         )
 
         total_choix_final = _compter_lignes_tableau_bord(
@@ -2359,7 +2466,10 @@ def get_tableau_bord_doyen_avance():
             FROM documents_choix_final d
             JOIN choix_finaux_orientation cfo ON d.choix_final_id = cfo.id
             WHERE cfo.annee_universitaire = %s
-              AND d.statut_document IN ('document_confirme', 'confirme', 'valide')
+              AND (
+                    d.statut_document IN ('document_confirme', 'confirme', 'valide')
+                    OR cfo.statut_choix = 'choix_confirme'
+              )
             """,
             (annee_universitaire,)
         )
@@ -2371,7 +2481,10 @@ def get_tableau_bord_doyen_avance():
             FROM documents_choix_final d
             JOIN choix_finaux_orientation cfo ON d.choix_final_id = cfo.id
             WHERE cfo.annee_universitaire = %s
-              AND d.statut_document IN ('document_refuse', 'refuse')
+              AND (
+                    d.statut_document IN ('document_refuse', 'refuse')
+                    OR cfo.statut_choix = 'document_refuse'
+              )
             """,
             (annee_universitaire,)
         )
@@ -2428,15 +2541,17 @@ def get_tableau_bord_doyen_avance():
                 COALESCE(SUM(CASE WHEN cfo.statut_choix = 'choix_confirme' THEN 1 ELSE 0 END), 0) AS total_confirmes,
                 COALESCE(SUM(CASE WHEN cfo.statut_choix = 'en_attente_confirmation_doyen' THEN 1 ELSE 0 END), 0) AS total_en_attente,
                 COALESCE(SUM(CASE WHEN cfo.statut_choix = 'document_refuse' THEN 1 ELSE 0 END), 0) AS total_refuses,
-                COALESCE(SUM(CASE WHEN cfo.statut_choix = 'fiche_generee' THEN 1 ELSE 0 END), 0) AS fiches_engagement_generees,
+                COALESCE(SUM(CASE WHEN cfo.statut_choix IN (
+                    'fiche_generee',
+                    'en_attente_confirmation_doyen',
+                    'choix_confirme',
+                    'document_refuse'
+                ) THEN 1 ELSE 0 END), 0) AS fiches_engagement_generees,
                 (
                     SELECT COUNT(*)
                     FROM fiches_intelligentes fi
                     JOIN specialites sr ON fi.specialite_recommandee_id = sr.id
-                    JOIN tests_orientation t ON fi.test_orientation_id = t.id
-                    JOIN etudiants e ON t.etudiant_id = e.id
                     WHERE sr.id = s.id
-                      AND e.promotion = %s
                 ) AS total_recommandations
             FROM specialites s
             LEFT JOIN choix_finaux_orientation cfo
@@ -2445,7 +2560,7 @@ def get_tableau_bord_doyen_avance():
             GROUP BY s.id, s.nom
             ORDER BY s.nom
             """,
-            (annee_universitaire, annee_universitaire)
+            (annee_universitaire,)
         )
 
         repartition_filieres = cursor.fetchall()
@@ -2510,6 +2625,11 @@ def get_tableau_bord_doyen_avance():
         return {
             "success": True,
             "annee_universitaire": annee_universitaire,
+            "source_reference": "plateforme",
+            "message": (
+                "Tableau de bord calculé automatiquement à partir des étudiants "
+                "enregistrés dans la plateforme."
+            ),
             "indicateurs": {
                 "total_etudiants": total_etudiants,
                 "total_tests": total_tests,
@@ -2843,8 +2963,8 @@ def _construire_ligne_suivi(ligne, source_reference):
         "fiche_generee": fiche_generee,
         "choix_fait": choix_fait,
         "document_depose": document_depose,
-        "filiere_recommandee": ligne.get("filiere_recommandee") or "",
-        "filiere_choisie": ligne.get("filiere_choisie") or "Non choisie",
+        "filiere_recommandee": normaliser_nom_specialite(ligne.get("filiere_recommandee")) or "",
+        "filiere_choisie": normaliser_nom_specialite(ligne.get("filiere_choisie")) or "Non choisie",
         "statut_choix": statut_choix,
         "statut_document": statut_document,
         "date_test": _convertir_date_historique(ligne.get("date_test")),
@@ -2921,11 +3041,16 @@ def _calculer_repartition_suivi(lignes_suivi):
     return sorted(repartition.values(), key=lambda item: item["filiere"])
 
 
-def get_suivi_promotion_doyen():
+def get_suivi_promotion_doyen(annee_universitaire=None):
     """
     Retourne le suivi de la promotion pour le doyen.
-    Le but est le contrôle : test fait, choix fait, document déposé/confirmé.
-    Aucune organisation de classes n’est effectuée ici.
+
+    Nouvelle logique :
+    - plus besoin d'importer une liste officielle ;
+    - le suivi est construit automatiquement depuis les étudiants inscrits
+      dans la plateforme ;
+    - l'export Excel peut donc utiliser directement les étudiants dont le
+      document a été confirmé par le doyen.
     """
     connection = get_db_connection()
 
@@ -2936,127 +3061,71 @@ def get_suivi_promotion_doyen():
         }
 
     cursor = connection.cursor(dictionary=True)
-    annee_universitaire = get_code_annee_universitaire_active()
+
+    if not annee_universitaire:
+        annee_universitaire = get_code_annee_universitaire_active()
 
     try:
-        _assurer_table_etudiants_officiels(cursor)
+        colonnes_tests = (
+            _get_colonnes_table(cursor, "tests_orientation")
+            if _table_existe(cursor, "tests_orientation")
+            else set()
+        )
 
-        colonnes_tests = _get_colonnes_table(cursor, "tests_orientation") if _table_existe(cursor, "tests_orientation") else set()
         colonne_date_test = _premiere_colonne_existante(
             colonnes_tests,
             ["date_creation", "date_debut", "date_lancement", "created_at"]
         )
+
         date_test_sql = f"t.{colonne_date_test}" if colonne_date_test else "NULL"
 
-        total_officiels = _compter_lignes_tableau_bord(
-            cursor,
-            """
-            SELECT COUNT(*) AS total
-            FROM etudiants_officiels_promotion
-            WHERE annee_universitaire = %s
-              AND active = 1
+        source_reference = "plateforme"
+
+        cursor.execute(
+            f"""
+            SELECT
+                e.id_universitaire,
+                e.nom,
+                e.prenom,
+                e.email AS email_outlook,
+                e.email AS email_plateforme,
+                e.id AS etudiant_id,
+                t.id AS test_id,
+                {date_test_sql} AS date_test,
+                fi.id AS fiche_id,
+                fi.date_generation AS date_fiche,
+                sr.nom AS filiere_recommandee,
+                cfo.id AS choix_id,
+                cfo.statut_choix,
+                cfo.date_choix,
+                sc.nom AS filiere_choisie,
+                d.id AS document_id,
+                d.statut_document,
+                d.date_upload AS date_depot_document
+            FROM etudiants e
+            LEFT JOIN tests_orientation t ON t.id = (
+                SELECT MAX(t2.id)
+                FROM tests_orientation t2
+                WHERE t2.etudiant_id = e.id
+            )
+            LEFT JOIN fiches_intelligentes fi ON fi.test_orientation_id = t.id
+            LEFT JOIN specialites sr ON fi.specialite_recommandee_id = sr.id
+            LEFT JOIN choix_finaux_orientation cfo ON cfo.id = (
+                SELECT MAX(cfo2.id)
+                FROM choix_finaux_orientation cfo2
+                WHERE cfo2.etudiant_id = e.id
+                  AND cfo2.annee_universitaire = %s
+            )
+            LEFT JOIN specialites sc ON cfo.specialite_id = sc.id
+            LEFT JOIN documents_choix_final d ON d.id = (
+                SELECT MAX(d2.id)
+                FROM documents_choix_final d2
+                WHERE d2.choix_final_id = cfo.id
+            )
+            ORDER BY e.nom, e.prenom, e.id_universitaire
             """,
             (annee_universitaire,)
         )
-
-        if total_officiels > 0:
-            source_reference = "liste_officielle"
-            cursor.execute(
-                f"""
-                SELECT
-                    o.id_universitaire,
-                    o.nom,
-                    o.prenom,
-                    o.email_outlook,
-                    e.id AS etudiant_id,
-                    e.email AS email_plateforme,
-                    t.id AS test_id,
-                    {date_test_sql} AS date_test,
-                    fi.id AS fiche_id,
-                    fi.date_generation AS date_fiche,
-                    sr.nom AS filiere_recommandee,
-                    cfo.id AS choix_id,
-                    cfo.statut_choix,
-                    cfo.date_choix,
-                    sc.nom AS filiere_choisie,
-                    d.id AS document_id,
-                    d.statut_document,
-                    d.date_upload AS date_depot_document
-                FROM etudiants_officiels_promotion o
-                LEFT JOIN etudiants e ON e.id_universitaire = o.id_universitaire
-                LEFT JOIN tests_orientation t ON t.id = (
-                    SELECT MAX(t2.id)
-                    FROM tests_orientation t2
-                    WHERE t2.etudiant_id = e.id
-                )
-                LEFT JOIN fiches_intelligentes fi ON fi.test_orientation_id = t.id
-                LEFT JOIN specialites sr ON fi.specialite_recommandee_id = sr.id
-                LEFT JOIN choix_finaux_orientation cfo ON cfo.id = (
-                    SELECT MAX(cfo2.id)
-                    FROM choix_finaux_orientation cfo2
-                    WHERE cfo2.etudiant_id = e.id
-                      AND cfo2.annee_universitaire = %s
-                )
-                LEFT JOIN specialites sc ON cfo.specialite_id = sc.id
-                LEFT JOIN documents_choix_final d ON d.id = (
-                    SELECT MAX(d2.id)
-                    FROM documents_choix_final d2
-                    WHERE d2.choix_final_id = cfo.id
-                )
-                WHERE o.annee_universitaire = %s
-                  AND o.active = 1
-                ORDER BY o.nom, o.prenom, o.id_universitaire
-                """,
-                (annee_universitaire, annee_universitaire)
-            )
-        else:
-            source_reference = "plateforme"
-            cursor.execute(
-                f"""
-                SELECT
-                    e.id_universitaire,
-                    e.nom,
-                    e.prenom,
-                    e.email AS email_outlook,
-                    e.email AS email_plateforme,
-                    e.id AS etudiant_id,
-                    t.id AS test_id,
-                    {date_test_sql} AS date_test,
-                    fi.id AS fiche_id,
-                    fi.date_generation AS date_fiche,
-                    sr.nom AS filiere_recommandee,
-                    cfo.id AS choix_id,
-                    cfo.statut_choix,
-                    cfo.date_choix,
-                    sc.nom AS filiere_choisie,
-                    d.id AS document_id,
-                    d.statut_document,
-                    d.date_upload AS date_depot_document
-                FROM etudiants e
-                LEFT JOIN tests_orientation t ON t.id = (
-                    SELECT MAX(t2.id)
-                    FROM tests_orientation t2
-                    WHERE t2.etudiant_id = e.id
-                )
-                LEFT JOIN fiches_intelligentes fi ON fi.test_orientation_id = t.id
-                LEFT JOIN specialites sr ON fi.specialite_recommandee_id = sr.id
-                LEFT JOIN choix_finaux_orientation cfo ON cfo.id = (
-                    SELECT MAX(cfo2.id)
-                    FROM choix_finaux_orientation cfo2
-                    WHERE cfo2.etudiant_id = e.id
-                      AND cfo2.annee_universitaire = %s
-                )
-                LEFT JOIN specialites sc ON cfo.specialite_id = sc.id
-                LEFT JOIN documents_choix_final d ON d.id = (
-                    SELECT MAX(d2.id)
-                    FROM documents_choix_final d2
-                    WHERE d2.choix_final_id = cfo.id
-                )
-                WHERE e.promotion = %s
-                ORDER BY e.nom, e.prenom, e.id_universitaire
-                """,
-                (annee_universitaire, annee_universitaire)
-            )
 
         lignes = cursor.fetchall()
         suivi = [_construire_ligne_suivi(ligne, source_reference) for ligne in lignes]
@@ -3077,9 +3146,9 @@ def get_suivi_promotion_doyen():
             "etudiants_a_suivre": etudiants_a_suivre[:60],
             "source_reference": source_reference,
             "message": (
-                "Suivi basé sur la liste officielle importée."
-                if source_reference == "liste_officielle"
-                else "Aucune liste officielle importée : suivi basé sur les étudiants inscrits dans la plateforme."
+                "Suivi basé automatiquement sur les étudiants inscrits dans "
+                "la plateforme. L’import manuel de la liste officielle n’est "
+                "plus nécessaire."
             )
         }
 
@@ -3095,3 +3164,4 @@ def get_suivi_promotion_doyen():
     finally:
         cursor.close()
         connection.close()
+

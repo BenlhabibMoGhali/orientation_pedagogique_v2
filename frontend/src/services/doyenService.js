@@ -34,6 +34,14 @@ function headersJsonAutorises() {
   }
 }
 
+function construireQueryAnnee(anneeUniversitaire) {
+  if (!anneeUniversitaire) {
+    return ''
+  }
+
+  return `?annee=${encodeURIComponent(anneeUniversitaire)}`
+}
+
 export async function rechercherFichesParIdUniversitaire(recherche) {
   const response = await fetch(
     `${API_BASE_URL}/doyen/fiches/rechercher/${encodeURIComponent(recherche)}`,
@@ -46,7 +54,6 @@ export async function rechercherFichesParIdUniversitaire(recherche) {
 
   return lireReponseJson(response, 'Erreur lors de la recherche.')
 }
-
 
 export async function autoriserNouveauTest(utilisateurId, idUniversitaire) {
   const response = await fetch(`${API_BASE_URL}/doyen/autoriser-nouveau-test`, {
@@ -61,17 +68,23 @@ export async function autoriserNouveauTest(utilisateurId, idUniversitaire) {
   return lireReponseJson(response, 'Erreur lors de l’autorisation.')
 }
 
+export async function getRepartitionChoixFilieres(anneeUniversitaire = '') {
+  const query = construireQueryAnnee(anneeUniversitaire)
 
-export async function getRepartitionChoixFilieres() {
-  const response = await fetch(`${API_BASE_URL}/doyen/repartition-choix-filieres`, {
-    headers: {
-      ...getAuthorizationHeaders()
+  const response = await fetch(
+    `${API_BASE_URL}/doyen/repartition-choix-filieres${query}`,
+    {
+      headers: {
+        ...getAuthorizationHeaders()
+      }
     }
-  })
+  )
 
-  return lireReponseJson(response, 'Erreur lors du chargement de la répartition des choix.')
+  return lireReponseJson(
+    response,
+    'Erreur lors du chargement de la répartition des choix.'
+  )
 }
-
 
 export async function getDocumentsAConfirmer() {
   const response = await fetch(`${API_BASE_URL}/doyen/documents/a-confirmer`, {
@@ -83,11 +96,9 @@ export async function getDocumentsAConfirmer() {
   return lireReponseJson(response, 'Erreur lors du chargement des documents.')
 }
 
-
 export function getUrlVisualisationDocument(documentId) {
   return ajouterTokenUrl(`${API_BASE_URL}/doyen/documents/${documentId}/visualiser`)
 }
-
 
 export async function prendreDecisionDocument(
   utilisateurId,
@@ -109,61 +120,6 @@ export async function prendreDecisionDocument(
   return lireReponseJson(response, 'Erreur lors de la décision.')
 }
 
-
-export async function getResumeReinitialisation(anneeUniversitaire) {
-  const response = await fetch(
-    `${API_BASE_URL}/doyen/reinitialisation/resume/${encodeURIComponent(anneeUniversitaire)}`,
-    {
-      headers: {
-        ...getAuthorizationHeaders()
-      }
-    }
-  )
-
-  return lireReponseJson(response, 'Erreur lors du chargement du résumé.')
-}
-
-
-export async function creerDemandeReinitialisation(
-  utilisateurId,
-  anneeUniversitaire,
-  motDePasse,
-  phraseSecurite
-) {
-  const response = await fetch(`${API_BASE_URL}/doyen/reinitialisation/demande`, {
-    method: 'POST',
-    headers: headersJsonAutorises(),
-    body: JSON.stringify({
-      utilisateur_id: utilisateurId,
-      annee_universitaire: anneeUniversitaire,
-      mot_de_passe: motDePasse,
-      phrase_securite: phraseSecurite
-    })
-  })
-
-  return lireReponseJson(response, 'Erreur lors de la demande de réinitialisation.')
-}
-
-
-export async function confirmerReinitialisation(
-  utilisateurId,
-  reinitialisationId,
-  codeConfirmation
-) {
-  const response = await fetch(`${API_BASE_URL}/doyen/reinitialisation/confirmer`, {
-    method: 'POST',
-    headers: headersJsonAutorises(),
-    body: JSON.stringify({
-      utilisateur_id: utilisateurId,
-      reinitialisation_id: reinitialisationId,
-      code_confirmation: codeConfirmation
-    })
-  })
-
-  return lireReponseJson(response, 'Erreur lors de la confirmation.')
-}
-
-
 export async function getDiscussionFiche(ficheId) {
   const response = await fetch(`${API_BASE_URL}/doyen/fiches/${ficheId}/discussion`, {
     headers: {
@@ -174,16 +130,13 @@ export async function getDiscussionFiche(ficheId) {
   return lireReponseJson(response, 'Erreur lors du chargement de la discussion.')
 }
 
-
 export function getUrlDiscussionFichePdf(ficheId) {
   return ajouterTokenUrl(`${API_BASE_URL}/doyen/fiches/${ficheId}/discussion/pdf`)
 }
 
-
 export function getUrlDiscussionFicheTxt(ficheId) {
   return ajouterTokenUrl(`${API_BASE_URL}/doyen/fiches/${ficheId}/discussion/txt`)
 }
-
 
 export async function getEtatNotificationEmail() {
   const response = await fetch(`${API_BASE_URL}/doyen/notifications/email/etat`, {
@@ -211,7 +164,6 @@ export async function getAnneeUniversitaireActive() {
   )
 }
 
-
 export async function getAnneesUniversitaires() {
   const response = await fetch(`${API_BASE_URL}/doyen/annees-universitaires`, {
     headers: {
@@ -238,10 +190,10 @@ export async function getHistoriqueEtudiantFiche(ficheId) {
   )
 }
 
+export async function getTableauBordDoyenAvance(anneeUniversitaire = '') {
+  const query = construireQueryAnnee(anneeUniversitaire)
 
-
-export async function getTableauBordDoyenAvance() {
-  const response = await fetch(`${API_BASE_URL}/doyen/tableau-bord/avance`, {
+  const response = await fetch(`${API_BASE_URL}/doyen/tableau-bord/avance${query}`, {
     headers: {
       ...getAuthorizationHeaders()
     }
@@ -253,9 +205,10 @@ export async function getTableauBordDoyenAvance() {
   )
 }
 
+export async function getSuiviPromotionDoyen(anneeUniversitaire = '') {
+  const query = construireQueryAnnee(anneeUniversitaire)
 
-export async function getSuiviPromotionDoyen() {
-  const response = await fetch(`${API_BASE_URL}/doyen/promotion/suivi`, {
+  const response = await fetch(`${API_BASE_URL}/doyen/promotion/suivi${query}`, {
     headers: {
       ...getAuthorizationHeaders()
     }
@@ -267,31 +220,16 @@ export async function getSuiviPromotionDoyen() {
   )
 }
 
+export function getUrlExportSuiviPromotionExcel(anneeUniversitaire = '') {
+  const query = construireQueryAnnee(anneeUniversitaire)
 
-export async function importerListeOfficiellePromotion(texteCsv, remplacer = false) {
-  const response = await fetch(`${API_BASE_URL}/doyen/promotion/liste-officielle/importer`, {
-    method: 'POST',
-    headers: headersJsonAutorises(),
-    body: JSON.stringify({
-      texte_csv: texteCsv,
-      remplacer: remplacer
-    })
-  })
-
-  return lireReponseJson(
-    response,
-    'Erreur lors de l’import de la liste officielle.'
-  )
+  return ajouterTokenUrl(`${API_BASE_URL}/doyen/promotion/export-excel${query}`)
 }
 
+export async function getArchivesAdministratives(anneeUniversitaire = '') {
+  const query = construireQueryAnnee(anneeUniversitaire)
 
-export function getUrlExportSuiviPromotionExcel() {
-  return ajouterTokenUrl(`${API_BASE_URL}/doyen/promotion/export-excel`)
-}
-
-
-export async function getArchivesAdministratives() {
-  const response = await fetch(`${API_BASE_URL}/doyen/archives/administratives`, {
+  const response = await fetch(`${API_BASE_URL}/doyen/archives/administratives${query}`, {
     headers: {
       ...getAuthorizationHeaders()
     }
@@ -303,17 +241,31 @@ export async function getArchivesAdministratives() {
   )
 }
 
-
 export function getUrlArchiveFicheVisualisation(archiveId) {
   return ajouterTokenUrl(`${API_BASE_URL}/doyen/archives/fiches/${archiveId}/visualiser`)
 }
-
 
 export function getUrlArchiveFicheTelechargement(archiveId) {
   return ajouterTokenUrl(`${API_BASE_URL}/doyen/archives/fiches/${archiveId}/telecharger`)
 }
 
-
 export function getUrlArchiveExportExcelTelechargement(archiveId) {
   return ajouterTokenUrl(`${API_BASE_URL}/doyen/archives/exports/${archiveId}/telecharger`)
+}
+export async function getResumeReinitialisation() {
+  throw new Error(
+    "La réinitialisation annuelle a été retirée du projet. Les données sont conservées par année universitaire."
+  )
+}
+
+export async function creerDemandeReinitialisation() {
+  throw new Error(
+    "La réinitialisation annuelle a été retirée du projet. Les données sont conservées par année universitaire."
+  )
+}
+
+export async function confirmerReinitialisation() {
+  throw new Error(
+    "La réinitialisation annuelle a été retirée du projet. Les données sont conservées par année universitaire."
+  )
 }

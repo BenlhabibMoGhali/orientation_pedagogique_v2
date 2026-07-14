@@ -34,3 +34,4 @@ CONFIGURATION_PROF_PRIVEE.txt
 CONFIGURATION_PROF_PRIVEE_REEL.txt
 backend_env_pret.env
 *.env.local
+backend/archives/

@@ -549,32 +549,93 @@ def get_specialites_dict():
 
 
 def extraire_scores_et_pourcentages(resultat_recommandation):
-    scores = resultat_recommandation.get("scores", {})
-    pourcentages = resultat_recommandation.get("pourcentages", {})
+    """
+    Retourne toujours les scores et pourcentages des 5 spécialités.
 
-    if scores is None:
-        scores = {}
+    Correction importante : les pourcentages doivent représenter une
+    répartition complète dont la somme vaut 100% lorsque le total des scores
+    est positif. On privilégie les scores bruts, car ce sont eux qui permettent
+    de recalculer proprement les pourcentages.
+    """
+    specialites_reference = [
+        "Big Data",
+        "Intelligence Artificielle",
+        "Cybersécurité",
+        "Développement Full Stack",
+        "Robotique et Cobotique"
+    ]
 
-    if pourcentages is None:
-        pourcentages = {}
+    scores_source = resultat_recommandation.get("scores", {})
+    pourcentages_source = resultat_recommandation.get("pourcentages", {})
 
-    if not isinstance(scores, dict):
-        scores = {}
+    if not isinstance(scores_source, dict):
+        scores_source = {}
 
-    if not isinstance(pourcentages, dict):
-        pourcentages = {}
+    if not isinstance(pourcentages_source, dict):
+        pourcentages_source = {}
 
-    if scores and not pourcentages:
-        total = sum(scores.values())
+    specialites = list(specialites_reference)
 
-        if total > 0:
-            for nom_specialite, score in scores.items():
-                pourcentage = (score / total) * 100
-                pourcentages[nom_specialite] = round(pourcentage, 2)
+    for nom_specialite in list(scores_source.keys()) + list(pourcentages_source.keys()):
+        if nom_specialite not in specialites:
+            specialites.append(nom_specialite)
 
-    if pourcentages and not scores:
+    scores = {}
+
+    for nom_specialite in specialites:
+        try:
+            score = float(scores_source.get(nom_specialite, 0) or 0)
+        except Exception:
+            score = 0
+
+        if score < 0:
+            score = 0
+
+        scores[nom_specialite] = round(score, 2)
+
+    total_scores = sum(scores.values())
+
+    if total_scores <= 0:
+        valeurs_pourcentages = {}
+
+        for nom_specialite in specialites:
+            try:
+                valeur = float(pourcentages_source.get(nom_specialite, 0) or 0)
+            except Exception:
+                valeur = 0
+
+            if valeur < 0:
+                valeur = 0
+
+            valeurs_pourcentages[nom_specialite] = valeur
+
+        total_pourcentages = sum(valeurs_pourcentages.values())
+
+        if total_pourcentages <= 0:
+            pourcentages = {nom_specialite: 0 for nom_specialite in specialites}
+        else:
+            pourcentages = {
+                nom_specialite: round((valeur / total_pourcentages) * 100, 2)
+                for nom_specialite, valeur in valeurs_pourcentages.items()
+            }
+
         for nom_specialite, pourcentage in pourcentages.items():
             scores[nom_specialite] = int(round(float(pourcentage)))
+    else:
+        pourcentages = {
+            nom_specialite: round((score / total_scores) * 100, 2)
+            for nom_specialite, score in scores.items()
+        }
+
+    somme_pourcentages = round(sum(float(valeur or 0) for valeur in pourcentages.values()), 2)
+    difference_arrondi = round(100 - somme_pourcentages, 2)
+
+    if abs(difference_arrondi) > 0 and abs(difference_arrondi) <= 0.05:
+        meilleure_specialite = max(scores, key=scores.get)
+        pourcentages[meilleure_specialite] = round(
+            pourcentages.get(meilleure_specialite, 0) + difference_arrondi,
+            2
+        )
 
     return scores, pourcentages
 

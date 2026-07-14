@@ -16,11 +16,6 @@ from reportlab.platypus import (
     TableStyle
 )
 
-from database.reinitialisation_repository import (
-    get_resume_reinitialisation_annuelle,
-    creer_demande_reinitialisation,
-    executer_reinitialisation_annuelle
-)
 
 from database.doyen_repository import (
     get_doyen_id_by_utilisateur_id,
@@ -72,6 +67,15 @@ doyen_bp = Blueprint(
     __name__,
     url_prefix="/api/doyen"
 )
+
+
+FILIERES_ORIENTATION = [
+    "Big Data",
+    "Intelligence Artificielle",
+    "Cybersécurité",
+    "Développement Full Stack",
+    "Robotique et Cobotique"
+]
 
 
 def nettoyer_texte_pdf(texte):
@@ -321,8 +325,10 @@ def ecrire_ligne_excel(ws, ligne_index, valeurs, style_entete=None):
 
 
 def ajuster_largeurs_excel(ws):
-    for colonne in ws.columns:
-        lettre = colonne[0].column_letter
+    from openpyxl.utils import get_column_letter
+
+    for index_colonne, colonne in enumerate(ws.iter_cols(), start=1):
+        lettre = get_column_letter(index_colonne)
         largeur = 12
 
         for cellule in colonne:
@@ -361,11 +367,20 @@ def generer_excel_suivi_promotion(resultat_suivi):
         "Email Outlook"
     ]
 
-    filieres = sorted({
+    filieres_presentes = sorted({
         ligne.get("filiere_choisie")
         for ligne in suivi
         if ligne.get("filiere_choisie") and ligne.get("filiere_choisie") != "Non choisie"
     })
+
+    filieres = [
+        filiere for filiere in FILIERES_ORIENTATION
+        if filiere in FILIERES_ORIENTATION
+    ]
+
+    for filiere in filieres_presentes:
+        if filiere not in filieres:
+            filieres.append(filiere)
 
     if len(filieres) == 0:
         filieres = ["Aucune filière"]
@@ -388,7 +403,7 @@ def generer_excel_suivi_promotion(resultat_suivi):
         ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
 
         ws.merge_cells("A2:D2")
-        ws["A2"] = "Liste des étudiants inscrits dans cette filière"
+        ws["A2"] = "Étudiants validés automatiquement par le doyen"
         ws["A2"].font = sous_titre_font
         ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
 
@@ -426,10 +441,103 @@ def generer_excel_suivi_promotion(resultat_suivi):
     return wb
 
 
+def recuperer_details_fiche_par_id_universitaire(id_universitaire):
+    if not id_universitaire:
+        return {}
+
+    try:
+        fiches = rechercher_fiches_par_id_universitaire(str(id_universitaire))
+    except Exception:
+        return {}
+
+    if not fiches:
+        return {}
+
+    for fiche in fiches:
+        if str(fiche.get("id_universitaire", "")) == str(id_universitaire):
+            return fiche
+
+    return fiches[0]
+
+
+def construire_suivi_promotion_depuis_fiches_validees(annee_universitaire=None):
+    archives = lister_archives_administratives(annee_universitaire)
+
+    if not archives.get("success"):
+        return archives
+
+    fiches_validees = archives.get("fiches", [])
+    suivi = []
+
+    for fiche_archivee in fiches_validees:
+        id_universitaire = fiche_archivee.get("id_universitaire", "")
+        details_fiche = recuperer_details_fiche_par_id_universitaire(id_universitaire)
+
+        filiere_choisie = (
+            fiche_archivee.get("filiere_choisie")
+            or details_fiche.get("filiere_choisie")
+            or details_fiche.get("choix_final")
+            or details_fiche.get("specialite_choisie")
+            or "Non choisie"
+        )
+
+        email = (
+            fiche_archivee.get("email_outlook")
+            or fiche_archivee.get("email")
+            or details_fiche.get("email_outlook")
+            or details_fiche.get("email")
+            or details_fiche.get("email_plateforme")
+            or ""
+        )
+
+        suivi.append({
+            "nom": fiche_archivee.get("nom") or details_fiche.get("nom", ""),
+            "prenom": fiche_archivee.get("prenom") or details_fiche.get("prenom", ""),
+            "id_universitaire": id_universitaire,
+            "email_outlook": email,
+            "email_plateforme": email,
+            "filiere_choisie": filiere_choisie
+        })
+
+    annee_universitaire = (
+        annee_universitaire
+        or archives.get("annee_universitaire")
+        or (
+            fiches_validees[0].get("annee_universitaire")
+            if len(fiches_validees) > 0
+            else None
+        )
+    )
+
+    if not annee_universitaire:
+        try:
+            resultat_annee = assurer_annee_universitaire_active()
+            annee_active = resultat_annee.get("annee_universitaire")
+
+            if isinstance(annee_active, dict):
+                annee_universitaire = annee_active.get("code") or "promotion"
+            else:
+                annee_universitaire = annee_active or "promotion"
+        except Exception:
+            annee_universitaire = "promotion"
+
+    return {
+        "success": True,
+        "annee_universitaire": annee_universitaire,
+        "suivi": suivi,
+        "total": len(suivi),
+        "message": (
+            "Export généré automatiquement à partir des fiches "
+            "d’engagement validées par le doyen."
+        )
+    }
+
+
 @doyen_bp.route("/tableau-bord/avance", methods=["GET"])
 @doyen_requis
 def tableau_bord_avance():
-    resultat = get_tableau_bord_doyen_avance()
+    annee = request.args.get("annee")
+    resultat = get_tableau_bord_doyen_avance(annee)
 
     status_code = 200 if resultat.get("success") else 500
 
@@ -440,7 +548,8 @@ def tableau_bord_avance():
 @doyen_bp.route("/promotion/suivi", methods=["GET"])
 @doyen_requis
 def suivi_promotion_doyen():
-    resultat = get_suivi_promotion_doyen()
+    annee = request.args.get("annee")
+    resultat = get_suivi_promotion_doyen(annee)
 
     status_code = 200 if resultat.get("success") else 400
 
@@ -477,7 +586,8 @@ def importer_liste_officielle_doyen():
 @doyen_requis
 def exporter_suivi_promotion_excel():
     try:
-        resultat = get_suivi_promotion_doyen()
+        annee = request.args.get("annee")
+        resultat = construire_suivi_promotion_depuis_fiches_validees(annee)
 
         if not resultat.get("success"):
             return jsonify(resultat), 400
@@ -533,7 +643,8 @@ def exporter_suivi_promotion_excel():
 @doyen_bp.route("/archives/administratives", methods=["GET"])
 @doyen_requis
 def archives_administratives_doyen():
-    resultat = lister_archives_administratives()
+    annee = request.args.get("annee")
+    resultat = lister_archives_administratives(annee)
     status_code = 200 if resultat.get("success") else 500
     return jsonify(resultat), status_code
 
@@ -925,107 +1036,37 @@ def etat_notification_email():
     }), 200
 
 
-@doyen_bp.route("/reinitialisation/resume/<annee_universitaire>", methods=["GET"])
+@doyen_bp.route("/reinitialisation/resume/<path:annee_universitaire>", methods=["GET"])
 @doyen_requis
 def resume_reinitialisation(annee_universitaire):
-    resultat = get_resume_reinitialisation_annuelle(annee_universitaire)
-
-    status_code = 200 if resultat["success"] else 400
-
-    return jsonify(resultat), status_code
+    return jsonify({
+        "success": False,
+        "message": (
+            "La réinitialisation annuelle destructive a été retirée du projet. "
+            "Les données sont désormais conservées par année universitaire."
+        )
+    }), 410
 
 
 @doyen_bp.route("/reinitialisation/demande", methods=["POST"])
 @doyen_requis
 def demande_reinitialisation():
-    data = request.get_json()
-
-    if data is None:
-        return jsonify({
-            "success": False,
-            "message": "Aucune donnée reçue."
-        }), 400
-
-    utilisateur_id = data.get("utilisateur_id")
-    annee_universitaire = data.get("annee_universitaire")
-    mot_de_passe = data.get("mot_de_passe")
-    phrase_securite = data.get("phrase_securite")
-
-    if utilisateur_id is None:
-        return jsonify({
-            "success": False,
-            "message": "utilisateur_id obligatoire."
-        }), 400
-
-    if not annee_universitaire:
-        return jsonify({
-            "success": False,
-            "message": "Année universitaire obligatoire."
-        }), 400
-
-    if not mot_de_passe:
-        return jsonify({
-            "success": False,
-            "message": "Mot de passe obligatoire."
-        }), 400
-
-    if not phrase_securite:
-        return jsonify({
-            "success": False,
-            "message": "Phrase de sécurité obligatoire."
-        }), 400
-
-    resultat = creer_demande_reinitialisation(
-        utilisateur_id,
-        annee_universitaire,
-        mot_de_passe,
-        phrase_securite
-    )
-
-    status_code = 200 if resultat["success"] else 400
-
-    return jsonify(resultat), status_code
+    return jsonify({
+        "success": False,
+        "message": (
+            "La réinitialisation annuelle destructive a été retirée du projet. "
+            "Les données sont désormais conservées par année universitaire."
+        )
+    }), 410
 
 
 @doyen_bp.route("/reinitialisation/confirmer", methods=["POST"])
 @doyen_requis
 def confirmer_reinitialisation():
-    data = request.get_json()
-
-    if data is None:
-        return jsonify({
-            "success": False,
-            "message": "Aucune donnée reçue."
-        }), 400
-
-    utilisateur_id = data.get("utilisateur_id")
-    reinitialisation_id = data.get("reinitialisation_id")
-    code_confirmation = data.get("code_confirmation")
-
-    if utilisateur_id is None:
-        return jsonify({
-            "success": False,
-            "message": "utilisateur_id obligatoire."
-        }), 400
-
-    if reinitialisation_id is None:
-        return jsonify({
-            "success": False,
-            "message": "reinitialisation_id obligatoire."
-        }), 400
-
-    if not code_confirmation:
-        return jsonify({
-            "success": False,
-            "message": "Code de confirmation obligatoire."
-        }), 400
-
-    resultat = executer_reinitialisation_annuelle(
-        utilisateur_id,
-        reinitialisation_id,
-        code_confirmation
-    )
-
-    status_code = 200 if resultat["success"] else 400
-
-    return jsonify(resultat), status_code
+    return jsonify({
+        "success": False,
+        "message": (
+            "La réinitialisation annuelle destructive a été retirée du projet. "
+            "Les données sont désormais conservées par année universitaire."
+        )
+    }), 410

@@ -4,18 +4,15 @@ import {
   getDocumentsAConfirmer,
   getUrlVisualisationDocument,
   prendreDecisionDocument,
-  getResumeReinitialisation,
-  creerDemandeReinitialisation,
-  confirmerReinitialisation,
   getDiscussionFiche,
   getUrlDiscussionFichePdf,
   getUrlDiscussionFicheTxt,
   getEtatNotificationEmail,
   getAnneeUniversitaireActive,
+  getAnneesUniversitaires,
   getHistoriqueEtudiantFiche,
   getTableauBordDoyenAvance,
   getSuiviPromotionDoyen,
-  importerListeOfficiellePromotion,
   getUrlExportSuiviPromotionExcel,
   getArchivesAdministratives,
   getUrlArchiveFicheVisualisation,
@@ -37,11 +34,6 @@ function DoyenPage({ utilisateur, onLogout }) {
   const [anneeUniversitaireActive, setAnneeUniversitaireActive] = useState(null)
   const [tableauBordAvance, setTableauBordAvance] = useState(null)
   const [suiviPromotion, setSuiviPromotion] = useState(null)
-  const [texteListeOfficielle, setTexteListeOfficielle] = useState('')
-  const [remplacerListeOfficielle, setRemplacerListeOfficielle] = useState(false)
-  const [afficherImportListe, setAfficherImportListe] = useState(false)
-  const [importListeEnCours, setImportListeEnCours] = useState(false)
-  const [messageImportListe, setMessageImportListe] = useState('')
   const [archivesAdministratives, setArchivesAdministratives] = useState({ fiches: [], exports: [] })
   const [chargementArchives, setChargementArchives] = useState(false)
   const [erreurArchives, setErreurArchives] = useState('')
@@ -53,13 +45,8 @@ function DoyenPage({ utilisateur, onLogout }) {
   const [documentSelectionne, setDocumentSelectionne] = useState(null)
   const [remarqueDocument, setRemarqueDocument] = useState('')
 
-  const [anneeReinitialisation, setAnneeReinitialisation] = useState('')
-  const [resumeReinitialisation, setResumeReinitialisation] = useState(null)
-  const [motDePasseDoyen, setMotDePasseDoyen] = useState('')
-  const [phraseSecurite, setPhraseSecurite] = useState('')
-  const [demandeReinitialisation, setDemandeReinitialisation] = useState(null)
-  const [codeConfirmation, setCodeConfirmation] = useState('')
-  const [reinitialisationEnCours, setReinitialisationEnCours] = useState(false)
+  const [anneesUniversitaires, setAnneesUniversitaires] = useState([])
+  const [anneeSelectionnee, setAnneeSelectionnee] = useState('')
 
   const [discussionDoyen, setDiscussionDoyen] = useState(null)
   const [chargementDiscussion, setChargementDiscussion] = useState(false)
@@ -72,7 +59,7 @@ function DoyenPage({ utilisateur, onLogout }) {
   const [fenetreStatistiquesOuverte, setFenetreStatistiquesOuverte] = useState(false)
 
   useEffect(() => {
-    chargerTableauDoyen()
+    initialiserEspaceDoyen()
   }, [])
 
   const afficherTexteAvecGrasEtSouligne = (texte) => {
@@ -114,6 +101,48 @@ function DoyenPage({ utilisateur, onLogout }) {
     ))
   }
 
+
+  const SPECIALITES_OFFICIELLES_PAR_ID = {
+    1: 'Big Data',
+    2: 'Intelligence Artificielle',
+    3: 'Cybersécurité',
+    4: 'Développement Full Stack',
+    5: 'Robotique et Cobotique'
+  }
+
+  const normaliserNomSpecialite = (valeur, specialiteId = null) => {
+    if (specialiteId && SPECIALITES_OFFICIELLES_PAR_ID[Number(specialiteId)]) {
+      return SPECIALITES_OFFICIELLES_PAR_ID[Number(specialiteId)]
+    }
+
+    const texte = String(valeur || '').trim()
+    const texteMinuscule = texte.toLowerCase()
+
+    if (texte === '') {
+      return ''
+    }
+
+    if (
+      texteMinuscule.includes('cyber') ||
+      texte.includes('Cybers├®curit├®') ||
+      texte.includes('Cybers|®curit|®') ||
+      texte.includes('Cybers\uFFFDcurit')
+    ) {
+      return 'Cybersécurité'
+    }
+
+    if (
+      texteMinuscule.includes('full stack') ||
+      texte.includes('D├®veloppement') ||
+      texte.includes('D|®veloppement') ||
+      texte.includes('D\uFFFDveloppement')
+    ) {
+      return 'Développement Full Stack'
+    }
+
+    return texte
+  }
+
   useEffect(() => {
     if (ficheSelectionnee && ficheSelectionnee.fiche_id) {
       chargerHistoriqueEtudiant(ficheSelectionnee.fiche_id)
@@ -123,56 +152,96 @@ function DoyenPage({ utilisateur, onLogout }) {
     }
   }, [ficheSelectionnee?.fiche_id])
 
-  const chargerTableauDoyen = async (afficherMessageActualisation = false) => {
-  setErreur('')
-  setChargementTableau(true)
-
-  try {
-    const resultatDocuments = await getDocumentsAConfirmer()
-    const resultatAnnee = await getAnneeUniversitaireActive()
-    const resultatTableauBord = await getTableauBordDoyenAvance()
-    const resultatSuiviPromotion = await getSuiviPromotionDoyen()
-    const resultatArchives = await getArchivesAdministratives()
-
-    setDocumentsAConfirmer(resultatDocuments.documents || [])
-    setAnneeUniversitaireActive(resultatAnnee.annee_universitaire || null)
-    setTableauBordAvance(resultatTableauBord || null)
-    setSuiviPromotion(resultatSuiviPromotion || null)
-    setArchivesAdministratives({
-      fiches: resultatArchives.fiches || [],
-      exports: resultatArchives.exports || []
-    })
-
-    if (resultatAnnee.annee_universitaire?.code) {
-      setAnneeReinitialisation(resultatAnnee.annee_universitaire.code)
-    }
+  const initialiserEspaceDoyen = async () => {
+    setErreur('')
+    setChargementTableau(true)
 
     try {
-      const resultatEtatEmail = await getEtatNotificationEmail()
+      const resultatAnnee = await getAnneeUniversitaireActive()
+      const anneeActive = resultatAnnee.annee_universitaire || null
+      const codeAnneeActive = anneeActive?.code || ''
 
-      setEtatNotificationEmail(resultatEtatEmail)
-    } catch (erreurEmail) {
-      setEtatNotificationEmail({
-        success: false,
-        email_configure: false,
-        message: (
-          "Impossible de vérifier l’état des notifications email. " +
-          "Les dépôts de documents restent fonctionnels."
+      setAnneeUniversitaireActive(anneeActive)
+      setAnneeSelectionnee(codeAnneeActive)
+
+      try {
+        const resultatAnnees = await getAnneesUniversitaires()
+        setAnneesUniversitaires(resultatAnnees.annees || [])
+      } catch (erreurAnnees) {
+        setAnneesUniversitaires(
+          codeAnneeActive
+            ? [{ code: codeAnneeActive, active: true }]
+            : []
         )
-      })
-    }
+      }
 
-    setDerniereActualisation(new Date().toLocaleString('fr-FR'))
-
-    if (afficherMessageActualisation) {
-      setMessage('Tableau doyen actualisé avec succès.')
+      await chargerTableauDoyen(false, codeAnneeActive)
+    } catch (error) {
+      setErreur(error.message)
+    } finally {
+      setChargementTableau(false)
     }
-  } catch (error) {
-    setErreur(error.message)
-  } finally {
-    setChargementTableau(false)
   }
-}
+
+  const chargerTableauDoyen = async (
+    afficherMessageActualisation = false,
+    anneeCible = anneeSelectionnee
+  ) => {
+    setErreur('')
+    setChargementTableau(true)
+
+    try {
+      const codeAnnee = anneeCible || anneeSelectionnee
+
+      const resultatDocuments = await getDocumentsAConfirmer()
+      const resultatTableauBord = await getTableauBordDoyenAvance(codeAnnee)
+      const resultatSuiviPromotion = await getSuiviPromotionDoyen(codeAnnee)
+      const resultatArchives = await getArchivesAdministratives(codeAnnee)
+
+      setDocumentsAConfirmer(resultatDocuments.documents || [])
+      setTableauBordAvance(resultatTableauBord || null)
+      setSuiviPromotion(resultatSuiviPromotion || null)
+      setArchivesAdministratives({
+        fiches: resultatArchives.fiches || [],
+        exports: resultatArchives.exports || []
+      })
+
+      try {
+        const resultatEtatEmail = await getEtatNotificationEmail()
+
+        setEtatNotificationEmail(resultatEtatEmail)
+      } catch (erreurEmail) {
+        setEtatNotificationEmail({
+          success: false,
+          email_configure: false,
+          message: (
+            "Impossible de vérifier l’état des notifications email. " +
+            "Les dépôts de documents restent fonctionnels."
+          )
+        })
+      }
+
+      setDerniereActualisation(new Date().toLocaleString('fr-FR'))
+
+      if (afficherMessageActualisation) {
+        setMessage(`Tableau doyen actualisé pour l’année ${codeAnnee || 'active'}.`)
+      }
+    } catch (error) {
+      setErreur(error.message)
+    } finally {
+      setChargementTableau(false)
+    }
+  }
+
+  const changerAnneeConsultation = async (event) => {
+    const nouvelleAnnee = event.target.value
+
+    setAnneeSelectionnee(nouvelleAnnee)
+    setMessage('')
+    setErreur('')
+
+    await chargerTableauDoyen(false, nouvelleAnnee)
+  }
 
   const rechercherFiche = async (event) => {
     event.preventDefault()
@@ -322,153 +391,12 @@ function DoyenPage({ utilisateur, onLogout }) {
     }
   }
 
-  const chargerResumeReinitialisation = async () => {
-    setErreur('')
-    setMessage('')
-    setResumeReinitialisation(null)
-    setDemandeReinitialisation(null)
-    setCodeConfirmation('')
-    setMotDePasseDoyen('')
-    setPhraseSecurite('')
-
-    if (anneeReinitialisation.trim() === '') {
-      setErreur('Veuillez saisir une année universitaire.')
-      return
-    }
-
-    try {
-      const resultat = await getResumeReinitialisation(
-        anneeReinitialisation.trim()
-      )
-
-      setResumeReinitialisation(resultat)
-    } catch (error) {
-      setErreur(error.message)
-    }
-  }
-
-  const demanderReinitialisation = async () => {
-    setErreur('')
-    setMessage('')
-
-    if (!resumeReinitialisation) {
-      setErreur('Veuillez d’abord charger le résumé.')
-      return
-    }
-
-    if (motDePasseDoyen.trim() === '') {
-      setErreur('Veuillez saisir le mot de passe du doyen.')
-      return
-    }
-
-    if (phraseSecurite.trim() === '') {
-      setErreur('Veuillez recopier la phrase de sécurité.')
-      return
-    }
-
-    setReinitialisationEnCours(true)
-
-    try {
-      const resultat = await creerDemandeReinitialisation(
-        utilisateur.id,
-        anneeReinitialisation.trim(),
-        motDePasseDoyen,
-        phraseSecurite.trim()
-      )
-
-      setDemandeReinitialisation(resultat)
-      setMessage(resultat.message)
-    } catch (error) {
-      setErreur(error.message)
-    } finally {
-      setReinitialisationEnCours(false)
-    }
-  }
-
-  const executerReinitialisation = async () => {
-    setErreur('')
-    setMessage('')
-
-    if (!demandeReinitialisation) {
-      setErreur('Aucune demande de réinitialisation créée.')
-      return
-    }
-
-    if (codeConfirmation.trim() === '') {
-      setErreur('Veuillez saisir le code de confirmation.')
-      return
-    }
-
-    const confirmation = window.confirm(
-      'Attention : cette action supprimera les étudiants et toutes leurs données liées pour cette année. Confirmez-vous ?'
-    )
-
-    if (!confirmation) {
-      return
-    }
-
-    setReinitialisationEnCours(true)
-
-    try {
-      const resultat = await confirmerReinitialisation(
-        utilisateur.id,
-        demandeReinitialisation.reinitialisation_id,
-        codeConfirmation.trim()
-      )
-
-      setMessage(resultat.message)
-      setResumeReinitialisation(null)
-      setDemandeReinitialisation(null)
-      setMotDePasseDoyen('')
-      setPhraseSecurite('')
-      setCodeConfirmation('')
-
-      await chargerTableauDoyen()
-    } catch (error) {
-      setErreur(error.message)
-    } finally {
-      setReinitialisationEnCours(false)
-    }
-  }
-
-
-  const importerListeOfficielle = async () => {
-    setErreur('')
-    setMessage('')
-    setMessageImportListe('')
-
-    if (texteListeOfficielle.trim() === '') {
-      setErreur(
-        'Collez d’abord la liste officielle sous la forme : ID;Nom;Prénom;Email Outlook.'
-      )
-      return
-    }
-
-    setImportListeEnCours(true)
-
-    try {
-      const resultat = await importerListeOfficiellePromotion(
-        texteListeOfficielle,
-        remplacerListeOfficielle
-      )
-
-      setMessageImportListe(resultat.message)
-      setTexteListeOfficielle('')
-      setRemplacerListeOfficielle(false)
-      await chargerTableauDoyen()
-    } catch (error) {
-      setErreur(error.message)
-    } finally {
-      setImportListeEnCours(false)
-    }
-  }
-
   const chargerArchivesAdministratives = async () => {
     setErreurArchives('')
     setChargementArchives(true)
 
     try {
-      const resultat = await getArchivesAdministratives()
+      const resultat = await getArchivesAdministratives(anneeSelectionnee)
 
       setArchivesAdministratives({
         fiches: resultat.fiches || [],
@@ -483,7 +411,7 @@ function DoyenPage({ utilisateur, onLogout }) {
 
   const telechargerExportSuiviPromotion = () => {
     window.open(
-      getUrlExportSuiviPromotionExcel(),
+      getUrlExportSuiviPromotionExcel(anneeSelectionnee),
       '_blank',
       'noopener,noreferrer'
     )
@@ -814,7 +742,7 @@ function DoyenPage({ utilisateur, onLogout }) {
                 <div>
                   <span className="info-label">Spécialité proposée</span>
                   <strong>
-                    {discussionDoyen.fiche.specialite_recommandee}
+                    {normaliserNomSpecialite(discussionDoyen.fiche.specialite_recommandee)}
                   </strong>
                 </div>
               </div>
@@ -979,7 +907,7 @@ function DoyenPage({ utilisateur, onLogout }) {
             <div className="profile-summary-card">
               <div>
                 <span className="info-label">Filière choisie</span>
-                <strong>{documentSelectionne.filiere_choisie}</strong>
+                <strong>{normaliserNomSpecialite(documentSelectionne.filiere_choisie)}</strong>
               </div>
 
               <div>
@@ -1093,7 +1021,7 @@ function DoyenPage({ utilisateur, onLogout }) {
                 <div className="section-title-row">
                   <div>
                     <h3>Tableau de bord avancé</h3>
-                    <p>Vue globale de l’activité pour l’année universitaire active.</p>
+                    <p>Vue globale de l’activité pour l’année universitaire sélectionnée.</p>
                   </div>
 
                   <span className="status-badge status-pending">
@@ -1151,7 +1079,7 @@ function DoyenPage({ utilisateur, onLogout }) {
                   {getRepartitionTableauBord().map((filiere) => (
                     <div className="dashboard-filiere-card" key={filiere.specialite_id}>
                       <div className="dashboard-filiere-header">
-                        <h4>{filiere.specialite}</h4>
+                        <h4>{normaliserNomSpecialite(filiere.specialite, filiere.specialite_id)}</h4>
 
                         <span className="status-badge status-pending">
                           {filiere.total_choix || 0} choix
@@ -1182,7 +1110,7 @@ function DoyenPage({ utilisateur, onLogout }) {
                       <div className="recent-document-row" key={document.document_id}>
                         <div>
                           <strong>{document.prenom} {document.nom}</strong>
-                          <p>{document.id_universitaire} — {document.filiere_choisie}</p>
+                          <p>{document.id_universitaire} — {normaliserNomSpecialite(document.filiere_choisie)}</p>
                           <small>{document.nom_fichier_original}</small>
                         </div>
 
@@ -1215,11 +1143,7 @@ function DoyenPage({ utilisateur, onLogout }) {
                     <strong>{formaterNombreDashboard(getResumeSuiviPromotion().total_inscrits)}</strong>
                   </div>
 
-                  <div className="promotion-summary-card metric-danger">
-                    <span>Non inscrits</span>
-                    <strong>{formaterNombreDashboard(getResumeSuiviPromotion().total_non_inscrits)}</strong>
-                  </div>
-
+              
                   <div className="promotion-summary-card">
                     <span>Tests faits</span>
                     <strong>{formaterNombreDashboard(getResumeSuiviPromotion().total_tests_faits)}</strong>
@@ -1256,7 +1180,7 @@ function DoyenPage({ utilisateur, onLogout }) {
                   <div className="promotion-filiere-grid">
                     {getRepartitionSuiviPromotion().map((filiere) => (
                       <div className="promotion-filiere-card" key={filiere.filiere}>
-                        <h4>{filiere.filiere}</h4>
+                        <h4>{normaliserNomSpecialite(filiere.filiere)}</h4>
 
                         <p><strong>Choix enregistrés :</strong> {filiere.total_choix}</p>
                         <p><strong>Documents déposés :</strong> {filiere.documents_deposes}</p>
@@ -1294,7 +1218,7 @@ function DoyenPage({ utilisateur, onLogout }) {
                             <td>{etudiant.prenom} {etudiant.nom}</td>
                             <td>{etudiant.id_universitaire}</td>
                             <td>{etudiant.email_outlook || etudiant.email_plateforme}</td>
-                            <td>{etudiant.filiere_choisie}</td>
+                            <td>{normaliserNomSpecialite(etudiant.filiere_choisie)}</td>
                             <td>
                               <span className={getStatutGlobalClass(etudiant.statut_global)}>
                                 {getStatutGlobalTexte(etudiant.statut_global)}
@@ -1341,41 +1265,63 @@ function DoyenPage({ utilisateur, onLogout }) {
           </button>
         </div>
 
-        {anneeUniversitaireActive && (
-          <div className="admin-panel-card academic-year-card">
-            <div className="section-title-row">
-              <div>
-                <h2>Année universitaire active</h2>
+        <div className="admin-panel-card academic-year-card">
+          <div className="section-title-row">
+            <div>
+              <h2>Année universitaire consultée</h2>
 
-                <p>
-                  Les inscriptions, choix finaux, documents et statistiques sont
-                  rattachés automatiquement à cette année universitaire.
-                </p>
-              </div>
-
-              <span className="status-badge status-valid">
-                {anneeUniversitaireActive.code}
-              </span>
+              <p>
+                L’année active est sélectionnée automatiquement. Le doyen peut
+                consulter les anciennes années sans supprimer l’historique.
+              </p>
             </div>
 
+            {anneeUniversitaireActive?.code && (
+              <span className="status-badge status-valid">
+                Année active : {anneeUniversitaireActive.code}
+              </span>
+            )}
+          </div>
+
+          {anneeUniversitaireActive && (
             <div className="profile-summary-card">
               <div>
-                <span className="info-label">Début</span>
+                <span className="info-label">Début année active</span>
                 <strong>{anneeUniversitaireActive.date_debut}</strong>
               </div>
 
               <div>
-                <span className="info-label">Fin</span>
+                <span className="info-label">Fin année active</span>
                 <strong>{anneeUniversitaireActive.date_fin}</strong>
               </div>
 
               <div>
-                <span className="info-label">Statut</span>
-                <strong>Active</strong>
+                <span className="info-label">Année affichée</span>
+                <strong>{anneeSelectionnee || anneeUniversitaireActive.code}</strong>
               </div>
             </div>
-          </div>
-        )}
+          )}
+
+          <label>Choisir une année universitaire</label>
+
+          <select
+            value={anneeSelectionnee}
+            onChange={changerAnneeConsultation}
+          >
+            {anneesUniversitaires.length === 0 && anneeSelectionnee && (
+              <option value={anneeSelectionnee}>
+                {anneeSelectionnee}
+              </option>
+            )}
+
+            {anneesUniversitaires.map((annee) => (
+              <option key={annee.id || annee.code} value={annee.code}>
+                {annee.code}
+                {annee.active ? ' — année active' : ''}
+              </option>
+            ))}
+          </select>
+        </div>
 
         <div className="admin-panel-card">
           <h2>Recherche d’un étudiant</h2>
@@ -1428,7 +1374,7 @@ function DoyenPage({ utilisateur, onLogout }) {
             >
               {fiches.map((fiche) => (
                 <option key={fiche.fiche_id} value={fiche.fiche_id}>
-                  Fiche {fiche.fiche_id} - {fiche.specialite_recommandee}
+                  Fiche {fiche.fiche_id} - {normaliserNomSpecialite(fiche.specialite_recommandee)}
                 </option>
               ))}
             </select>
@@ -1474,7 +1420,7 @@ function DoyenPage({ utilisateur, onLogout }) {
             <div className="profile-summary-card">
               <div>
                 <span className="info-label">Recommandation système</span>
-                <strong>{ficheSelectionnee.specialite_recommandee}</strong>
+                <strong>{normaliserNomSpecialite(ficheSelectionnee.specialite_recommandee)}</strong>
               </div>
 
               <div>
@@ -1608,7 +1554,7 @@ function DoyenPage({ utilisateur, onLogout }) {
               <div className="result-highlight-card">
                 <span className="info-label">Résultat principal proposé</span>
 
-                <h2>{meilleurScore.specialite}</h2>
+                <h2>{normaliserNomSpecialite(meilleurScore.specialite)}</h2>
 
                 <p>
                   Pourcentage obtenu :{' '}
@@ -1623,7 +1569,7 @@ function DoyenPage({ utilisateur, onLogout }) {
               {ficheSelectionnee.scores.map((score) => (
                 <div className="score-card" key={score.specialite}>
                   <div className="score-card-header">
-                    <span>{score.specialite}</span>
+                    <span>{normaliserNomSpecialite(score.specialite)}</span>
                     <strong>{score.pourcentage}%</strong>
                   </div>
 
@@ -1736,7 +1682,7 @@ function DoyenPage({ utilisateur, onLogout }) {
                     <tr key={`fiche-${archive.id}`}>
                       <td>{archive.id_universitaire}</td>
                       <td>{archive.prenom} {archive.nom}</td>
-                      <td>{archive.filiere_choisie}</td>
+                      <td>{normaliserNomSpecialite(archive.filiere_choisie)}</td>
                       <td>{archive.annee_universitaire}</td>
                       <td>
                         <button
@@ -1895,7 +1841,7 @@ function DoyenPage({ utilisateur, onLogout }) {
 
                         <p>
                           <strong>Filière choisie :</strong>{' '}
-                          {document.filiere_choisie}
+                          {normaliserNomSpecialite(document.filiere_choisie)}
                         </p>
 
                         <p>
@@ -1938,22 +1884,16 @@ function DoyenPage({ utilisateur, onLogout }) {
           <div className="admin-panel-card promotion-followup-card">
             <div className="section-title-row">
               <div>
-                <h2>Liste officielle et export Excel</h2>
+                <h2>Export Excel automatique</h2>
 
                 <p>
-                  Cette rubrique sert uniquement à importer la liste officielle
-                  de la promotion et à générer le fichier Excel simple par filière.
+                  Cette rubrique génère automatiquement le fichier Excel à partir
+                  des étudiants inscrits dans la plateforme dont la fiche
+                  d’engagement a été validée par le doyen.
                 </p>
               </div>
 
               <div className="discussion-actions" style={{ margin: 0 }}>
-                <button
-                  className="secondary-button small-button"
-                  onClick={() => setAfficherImportListe(!afficherImportListe)}
-                >
-                  {afficherImportListe ? 'Masquer l’import' : 'Importer la liste'}
-                </button>
-
                 <button
                   className="small-button"
                   onClick={telechargerExportSuiviPromotion}
@@ -1964,52 +1904,9 @@ function DoyenPage({ utilisateur, onLogout }) {
             </div>
 
             <p className="info-message">
-              L’export Excel contient uniquement le nom, le prénom, l’ID universitaire
-              et l’email Outlook des étudiants, avec une feuille par filière.
+              L’export Excel contient automatiquement les étudiants confirmés par le doyen,
+              répartis par filière, avec le nom, le prénom, l’ID universitaire et l’email.
             </p>
-
-            {afficherImportListe && (
-              <div className="official-import-card">
-                <h3>Importer la liste officielle de la promotion</h3>
-
-                <p>
-                  Collez les données depuis Excel avec l’ordre suivant :
-                  <strong> ID universitaire ; Nom ; Prénom ; Email Outlook</strong>.
-                </p>
-
-                <textarea
-                  className="official-import-textarea"
-                  value={texteListeOfficielle}
-                  onChange={(event) => setTexteListeOfficielle(event.target.value)}
-                  placeholder={
-                    'ID;Nom;Prénom;Email Outlook\n' +
-                    '1234567;EL AMRANI;Adam;adam.elamrani@eidia.ueuromed.org\n' +
-                    '7654321;BENALI;Sara;sara.benali@eidia.ueuromed.org'
-                  }
-                />
-
-                <label className="checkbox-line">
-                  <input
-                    type="checkbox"
-                    checked={remplacerListeOfficielle}
-                    onChange={(event) => setRemplacerListeOfficielle(event.target.checked)}
-                  />
-                  Remplacer l’ancienne liste officielle de cette année
-                </label>
-
-                <button
-                  className="small-button"
-                  onClick={importerListeOfficielle}
-                  disabled={importListeEnCours}
-                >
-                  {importListeEnCours ? 'Import en cours...' : 'Importer la liste'}
-                </button>
-
-                {messageImportListe && (
-                  <p className="success-message">{messageImportListe}</p>
-                )}
-              </div>
-            )}
           </div>
         )}
 
@@ -2033,152 +1930,6 @@ function DoyenPage({ utilisateur, onLogout }) {
             </button>
           </div>
         </div>
-
-
-        <div className="danger-zone-card">
-          <h2>Réinitialisation annuelle sécurisée</h2>
-
-          <p>
-            Cette action permet de supprimer les étudiants et leurs données
-            liées pour une année donnée. Les spécialités, questions
-            et comptes doyen ne seront pas supprimés.
-          </p>
-
-          <label>Année universitaire / promotion</label>
-
-          <div className="search-row">
-            <input
-              type="text"
-              value={anneeReinitialisation}
-              onChange={(event) => setAnneeReinitialisation(event.target.value)}
-              placeholder="Exemple : 2026"
-            />
-
-            <button
-              className="warning-button"
-              onClick={chargerResumeReinitialisation}
-              disabled={reinitialisationEnCours}
-            >
-              Charger le résumé
-            </button>
-          </div>
-
-          {resumeReinitialisation && (
-            <div className="reset-summary-card">
-              <h3>Résumé des données concernées</h3>
-
-              <p>
-                <strong>Étudiants :</strong>{' '}
-                {resumeReinitialisation.resume.total_etudiants}
-              </p>
-
-              <p>
-                <strong>Tests :</strong>{' '}
-                {resumeReinitialisation.resume.total_tests}
-              </p>
-
-              <p>
-                <strong>Fiches intelligentes :</strong>{' '}
-                {resumeReinitialisation.resume.total_fiches}
-              </p>
-
-              <p>
-                <strong>Choix finaux :</strong>{' '}
-                {resumeReinitialisation.resume.total_choix}
-              </p>
-
-              <p>
-                <strong>Documents déposés :</strong>{' '}
-                {resumeReinitialisation.resume.total_documents}
-              </p>
-
-              <h4>Phrase de sécurité obligatoire</h4>
-
-              <pre className="security-phrase-box">
-                {resumeReinitialisation.phrase_attendue}
-              </pre>
-
-              <label>Mot de passe du doyen</label>
-
-              <input
-                type="password"
-                value={motDePasseDoyen}
-                onChange={(event) => setMotDePasseDoyen(event.target.value)}
-                placeholder="Mot de passe du doyen"
-              />
-
-              <label>Recopier la phrase de sécurité</label>
-
-              <input
-                type="text"
-                value={phraseSecurite}
-                onChange={(event) => setPhraseSecurite(event.target.value)}
-                placeholder="Exemple : SUPPRIMER LES ETUDIANTS 2026"
-              />
-
-              <button
-                className="danger-button"
-                onClick={demanderReinitialisation}
-                disabled={reinitialisationEnCours}
-              >
-                Générer le code de confirmation
-              </button>
-            </div>
-          )}
-
-          {demandeReinitialisation && (
-            <div className="reset-summary-card">
-              <h3>Code de confirmation</h3>
-
-              <p>
-                Pour la démonstration, le code généré est :
-              </p>
-
-              <pre className="security-phrase-box">
-                {demandeReinitialisation.code_demo}
-              </pre>
-
-              <label>Saisir le code de confirmation</label>
-
-              <input
-                type="text"
-                value={codeConfirmation}
-                onChange={(event) => setCodeConfirmation(event.target.value)}
-                placeholder="Code à 6 chiffres"
-              />
-
-              <button
-                className="danger-button"
-                onClick={executerReinitialisation}
-                disabled={
-                  reinitialisationEnCours ||
-                  !demandeReinitialisation ||
-                  codeConfirmation.trim() === ''
-                }
-              >
-                {reinitialisationEnCours
-                  ? 'Réinitialisation en cours...'
-                  : 'Exécuter la réinitialisation annuelle'}
-              </button>
-            </div>
-          )}
-        </div>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
       </div>

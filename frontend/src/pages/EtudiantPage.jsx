@@ -15,6 +15,14 @@ import '../styles/LoginPage.css'
 const EXTENSIONS_DOCUMENTS_AUTORISEES = ['pdf', 'jpg', 'jpeg', 'png']
 const TAILLE_MAX_DOCUMENT_SIGNE = 5 * 1024 * 1024
 
+const SPECIALITES_CHOIX_FINAL = [
+  'Big Data',
+  'Intelligence Artificielle',
+  'Cybersécurité',
+  'Développement Full Stack',
+  'Robotique et Cobotique'
+]
+
 function EtudiantPage({ utilisateur, onLogout }) {
   const [sessionId, setSessionId] = useState(null)
   const [messages, setMessages] = useState([])
@@ -110,21 +118,87 @@ function EtudiantPage({ utilisateur, onLogout }) {
     ))
   }
 
-  const convertirEtatEnResultat = (etat) => {
+  const construireListeSpecialitesComplete = (valeurs = {}) => {
+    const specialitesSupplementaires = Object.keys(valeurs).filter(
+      (specialite) => !SPECIALITES_CHOIX_FINAL.includes(specialite)
+    )
+
+    return [
+      ...SPECIALITES_CHOIX_FINAL,
+      ...specialitesSupplementaires
+    ]
+  }
+
+  const normaliserPourcentages = (valeurs = {}) => {
+    const specialites = construireListeSpecialitesComplete(valeurs)
+    const valeursNumeriques = {}
+
+    specialites.forEach((specialite) => {
+      const valeur = Number(valeurs[specialite] || 0)
+      valeursNumeriques[specialite] = Number.isFinite(valeur) && valeur > 0 ? valeur : 0
+    })
+
+    const total = specialites.reduce(
+      (somme, specialite) => somme + valeursNumeriques[specialite],
+      0
+    )
+
+    if (total <= 0) {
+      return specialites.reduce((resultatNormalise, specialite) => {
+        resultatNormalise[specialite] = 0
+        return resultatNormalise
+      }, {})
+    }
+
     const pourcentages = {}
 
-    if (etat && Array.isArray(etat.scores)) {
-      etat.scores
+    specialites.forEach((specialite) => {
+      pourcentages[specialite] = Number(
+        ((valeursNumeriques[specialite] / total) * 100).toFixed(2)
+      )
+    })
+
+    const sommePourcentages = specialites.reduce(
+      (somme, specialite) => somme + pourcentages[specialite],
+      0
+    )
+
+    const differenceArrondi = Number((100 - sommePourcentages).toFixed(2))
+
+    if (Math.abs(differenceArrondi) > 0 && Math.abs(differenceArrondi) <= 0.05) {
+      const meilleureSpecialite = specialites
         .slice()
-        .sort((a, b) => Number(b.pourcentage) - Number(a.pourcentage))
-        .forEach((score) => {
-          pourcentages[score.specialite] = Number(score.pourcentage)
-        })
+        .sort((a, b) => valeursNumeriques[b] - valeursNumeriques[a])[0]
+
+      if (meilleureSpecialite) {
+        pourcentages[meilleureSpecialite] = Number(
+          (pourcentages[meilleureSpecialite] + differenceArrondi).toFixed(2)
+        )
+      }
     }
+
+    return pourcentages
+  }
+
+  const convertirEtatEnResultat = (etat) => {
+    const scores = {}
+    const pourcentagesDepuisBase = {}
+
+    if (etat && Array.isArray(etat.scores)) {
+      etat.scores.forEach((score) => {
+        scores[score.specialite] = Number(score.score || 0)
+        pourcentagesDepuisBase[score.specialite] = Number(score.pourcentage || 0)
+      })
+    }
+
+    const sourcePourcentages = Object.keys(scores).length > 0
+      ? normaliserPourcentages(scores)
+      : normaliserPourcentages(pourcentagesDepuisBase)
 
     return {
       specialite_recommandee: etat?.fiche?.specialite_recommandee || '',
-      pourcentages: pourcentages
+      scores: scores,
+      pourcentages: sourcePourcentages
     }
   }
 
@@ -637,21 +711,25 @@ function EtudiantPage({ utilisateur, onLogout }) {
   }
 
   const getSpecialites = () => {
-    if (!resultat || !resultat.pourcentages) {
-      return []
-    }
-
-    return Object.entries(resultat.pourcentages)
-      .sort((a, b) => Number(b[1]) - Number(a[1]))
-      .map(([specialite]) => specialite)
+    return construireListeSpecialitesComplete(resultat?.pourcentages || {})
   }
 
   const getPourcentagesTries = () => {
-    if (!resultat || !resultat.pourcentages) {
+    if (!resultat) {
       return []
     }
 
-    return Object.entries(resultat.pourcentages)
+    const sourceValeurs = resultat.scores && Object.keys(resultat.scores).length > 0
+      ? resultat.scores
+      : resultat.pourcentages || {}
+
+    const pourcentagesNormalises = normaliserPourcentages(sourceValeurs)
+
+    return construireListeSpecialitesComplete(pourcentagesNormalises)
+      .map((specialite) => [
+        specialite,
+        Number(pourcentagesNormalises[specialite] || 0)
+      ])
       .sort((a, b) => Number(b[1]) - Number(a[1]))
   }
 
@@ -1169,21 +1247,29 @@ function EtudiantPage({ utilisateur, onLogout }) {
 
             <div className="scores-list">
               {getPourcentagesTries().map(
-                ([specialite, pourcentage]) => (
-                  <div className="score-card" key={specialite}>
-                    <div className="score-card-header">
-                      <span>{specialite}</span>
-                      <strong>{pourcentage}%</strong>
-                    </div>
+                ([specialite, pourcentage]) => {
+                  const pourcentageNombre = Number(pourcentage || 0)
+                  const largeurBarre = Math.min(
+                    Math.max(pourcentageNombre, 0),
+                    100
+                  )
 
-                    <div className="score-progress">
-                      <div
-                        className="score-progress-fill"
-                        style={{ width: `${pourcentage}%` }}
-                      />
+                  return (
+                    <div className="score-card" key={specialite}>
+                      <div className="score-card-header">
+                        <span>{specialite}</span>
+                        <strong>{pourcentageNombre.toFixed(2)}%</strong>
+                      </div>
+
+                      <div className="score-progress">
+                        <div
+                          className="score-progress-fill"
+                          style={{ width: `${largeurBarre}%` }}
+                        />
+                      </div>
                     </div>
-                  </div>
-                )
+                  )
+                }
               )}
             </div>
 
