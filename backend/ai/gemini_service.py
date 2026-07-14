@@ -578,6 +578,15 @@ Voici le contexte actuel au format JSON :
 {json.dumps(user_context, ensure_ascii=False)}
 """
 
+def construire_erreur_gemini(code, message, detail=None):
+    return {
+        "success": False,
+        "erreur_ia": True,
+        "gemini_indisponible": True,
+        "code": code,
+        "message": message,
+        "detail_technique": str(detail)[:500] if detail else ""
+    }
 
 def traiter_message_chat_avec_gemini(
     question_actuelle,
@@ -585,10 +594,34 @@ def traiter_message_chat_avec_gemini(
     scores_actuels,
     historique=None
 ):
-    if not gemini_est_disponible():
-        return None
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+
+    if api_key == "":
+        return construire_erreur_gemini(
+            "gemini_api_key_absente",
+            (
+                "La clé API Gemini n’est pas configurée. "
+                "Le service d’intelligence artificielle ne peut pas analyser la réponse."
+            )
+        )
 
     try:
+        from google import genai
+    except Exception as e:
+        return construire_erreur_gemini(
+            "gemini_bibliotheque_absente",
+            (
+                "La bibliothèque Gemini n’est pas installée ou n’est pas accessible "
+                "dans l’environnement Python."
+            ),
+            e
+        )
+
+    try:
+        model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+
+        client = genai.Client(api_key=api_key)
+
         prompt_complet = construire_prompt_principal(
             question_actuelle,
             message_etudiant,
@@ -596,18 +629,72 @@ def traiter_message_chat_avec_gemini(
             historique
         )
 
-        texte = appeler_gemini(prompt_complet)
+        response = client.models.generate_content(
+            model=model,
+            contents=prompt_complet
+        )
 
-        if texte is None:
-            return None
+        texte = response.text
+
+        if texte is None or str(texte).strip() == "":
+            return construire_erreur_gemini(
+                "gemini_reponse_vide",
+                "Gemini n’a retourné aucune réponse exploitable."
+            )
 
         donnees = extraire_json_depuis_texte(texte)
+
+        if donnees is None:
+            return construire_erreur_gemini(
+                "gemini_json_invalide",
+                "Gemini a répondu, mais le format JSON reçu est invalide."
+            )
 
         return nettoyer_reponse_gemini(donnees)
 
     except Exception as e:
-        print("Erreur Gemini :", e)
-        return None
+        erreur = str(e).lower()
+
+        if (
+            "api key" in erreur
+            or "apikey" in erreur
+            or "invalid" in erreur
+            or "unauthorized" in erreur
+            or "permission" in erreur
+            or "401" in erreur
+            or "403" in erreur
+        ):
+            return construire_erreur_gemini(
+                "gemini_api_key_invalide",
+                (
+                    "La clé API Gemini est absente, invalide ou non autorisée. "
+                    "Veuillez vérifier la clé dans le fichier .env."
+                ),
+                e
+            )
+
+        if "quota" in erreur or "rate" in erreur or "limit" in erreur:
+            return construire_erreur_gemini(
+                "gemini_quota_depasse",
+                (
+                    "Le quota Gemini est dépassé ou le service limite temporairement "
+                    "les requêtes."
+                ),
+                e
+            )
+
+        if "timeout" in erreur or "deadline" in erreur:
+            return construire_erreur_gemini(
+                "gemini_timeout",
+                "Gemini met trop de temps à répondre. Veuillez réessayer.",
+                e
+            )
+
+        return construire_erreur_gemini(
+            "gemini_erreur_inconnue",
+            "Une erreur inconnue est survenue avec le service Gemini.",
+            e
+        )
 
 
 def generer_reponse_clarification_locale(question_actuelle, message_etudiant):

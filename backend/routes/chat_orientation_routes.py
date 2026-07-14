@@ -549,12 +549,49 @@ def traitement_ia_indisponible(traitement):
     return False
 
 
-def reponse_erreur_ia(session_id, question_actuelle, index_question):
+def construire_message_erreur_ia(traitement=None):
+    if isinstance(traitement, dict):
+        code = str(traitement.get("code", "")).lower()
+
+        if code in [
+            "gemini_api_key_absente",
+            "gemini_api_key_invalide"
+        ]:
+            return (
+                "Le service d’intelligence artificielle n’est pas configuré correctement. "
+                "La clé API Gemini est absente ou invalide. "
+                "Veuillez contacter l’administrateur de la plateforme."
+            )
+
+        if code == "gemini_bibliotheque_absente":
+            return (
+                "Le service d’intelligence artificielle n’est pas disponible sur le serveur. "
+                "La bibliothèque Gemini n’est pas installée correctement."
+            )
+
+        if code == "gemini_quota_depasse":
+            return (
+                "Le service d’intelligence artificielle est momentanément indisponible "
+                "car le quota Gemini est dépassé. Veuillez réessayer plus tard."
+            )
+
+        if code == "gemini_timeout":
+            return (
+                "Le service d’intelligence artificielle met trop de temps à répondre. "
+                "Veuillez réessayer dans quelques instants."
+            )
+
+    return MESSAGE_ERREUR_IA
+
+
+def reponse_erreur_ia(session_id, question_actuelle, index_question, traitement=None):
     """
     Retourne un message clair à l'étudiant si Gemini / IA ne répond pas.
     Le message est aussi enregistré dans la discussion.
     """
-    enregistrer_message_trace(session_id, "assistant", MESSAGE_ERREUR_IA)
+    message_erreur = construire_message_erreur_ia(traitement)
+
+    enregistrer_message_trace(session_id, "assistant", message_erreur)
 
     return jsonify({
         "success": True,
@@ -562,7 +599,8 @@ def reponse_erreur_ia(session_id, question_actuelle, index_question):
         "reste_sur_meme_question": True,
         "erreur_ia": True,
         "code": "service_ia_indisponible",
-        "message_bot": MESSAGE_ERREUR_IA,
+        "message": message_erreur,
+        "message_bot": message_erreur,
         "question": question_actuelle,
         "index_question": index_question,
         "nombre_questions": nombre_questions()
@@ -976,7 +1014,7 @@ def envoyer_message_chat():
 
     if traitement_ia_indisponible(traitement):
         print("Traitement IA invalide ou indisponible :", traitement)
-        return reponse_erreur_ia(session_id, question_actuelle, index_question), 200
+        return reponse_erreur_ia(session_id, question_actuelle, index_question,traitement), 200
 
     if traitement.get("type_message") != "reponse_orientation":
         message_bot = traitement.get("message_bot")

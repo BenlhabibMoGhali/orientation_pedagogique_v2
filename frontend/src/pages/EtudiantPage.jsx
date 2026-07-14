@@ -429,6 +429,13 @@ function EtudiantPage({ utilisateur, onLogout }) {
   const envoyerMessage = async (event) => {
     event.preventDefault()
 
+    if (!sessionId) {
+      setErreur(
+        "La session du chatbot n’est pas prête. Veuillez actualiser la page ou vous reconnecter."
+      )
+      return
+    }
+
     if (!reponseQuestionValide()) {
       setErreur('Veuillez répondre à la question avant de continuer.')
       return
@@ -443,7 +450,23 @@ function EtudiantPage({ utilisateur, onLogout }) {
     try {
       const reponse = await envoyerMessageChat(sessionId, contenu)
 
-      ajouterMessage('assistant', reponse.message_bot)
+      if (!reponse) {
+        throw new Error(
+          "Aucune réponse n’a été reçue depuis le chatbot."
+        )
+      }
+
+      const messageBot =
+        reponse.message_bot ||
+        reponse.message ||
+        "Une erreur est survenue pendant l’analyse de votre réponse."
+
+      ajouterMessage('assistant', messageBot)
+
+      if (reponse.erreur_ia || reponse.success === false) {
+        setErreur(messageBot)
+        return
+      }
 
       if (reponse.terminee) {
         setTerminee(true)
@@ -461,7 +484,16 @@ function EtudiantPage({ utilisateur, onLogout }) {
         reinitialiserReponseQuestion(reponse.question || questionCourante)
       }
     } catch (error) {
-      setErreur(error.message)
+      const messageErreur =
+        error.message ||
+        "Erreur lors de l’envoi de la réponse au chatbot."
+
+      setErreur(messageErreur)
+
+      ajouterMessage(
+        'assistant',
+        "Une erreur est survenue. Votre réponse n’a pas pu être analysée. Veuillez réessayer ou contacter l’administrateur."
+      )
     } finally {
       setEnvoi(false)
     }
@@ -885,7 +917,7 @@ function EtudiantPage({ utilisateur, onLogout }) {
           </div>
 
           <button type="submit" disabled={envoi || !reponseQuestionValide()}>
-            Valider la réponse
+            {envoi ? 'Analyse en cours...' : 'Valider la réponse'}
           </button>
         </form>
       )
@@ -942,7 +974,7 @@ function EtudiantPage({ utilisateur, onLogout }) {
           )}
 
           <button type="submit" disabled={envoi || !reponseQuestionValide()}>
-            Valider la réponse
+            {envoi ? 'Analyse en cours...' : 'Valider la réponse'}
           </button>
         </form>
       )
@@ -959,7 +991,7 @@ function EtudiantPage({ utilisateur, onLogout }) {
         />
 
         <button type="submit" disabled={envoi || !reponseQuestionValide()}>
-          Envoyer
+          {envoi ? 'Analyse en cours...' : 'Envoyer'}
         </button>
       </form>
     )
@@ -1205,6 +1237,18 @@ function EtudiantPage({ utilisateur, onLogout }) {
                 </div>
               )}
             </div>
+
+            {envoi && (
+              <p className="info-message">
+                Analyse en cours... Le chatbot traite votre réponse.
+              </p>
+            )}
+
+            {erreur && (
+              <p className="login-error">
+                {erreur}
+              </p>
+            )}
 
             {!terminee && afficherFormulaireQuestion()}
           </div>
